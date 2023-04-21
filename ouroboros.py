@@ -1,0 +1,247 @@
+import os
+import re
+import sys
+import json
+import shutil
+import logging
+import argparse
+from tabulate import tabulate
+from modules.utils import syscall, medaka_model_check, estimate_genome_size
+from modules.molt import molt
+
+
+class LoggerFactory:
+
+    FMT = "%(asctime)-20s[%(levelname)s] %(message)s"
+    DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+    def __init__(self):
+        self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(logging.INFO)
+
+    def addLogBoxHandler(self, logbox):
+        log_handler = logging.Handler(logbox)
+        formatter = logging.Formatter(self.FMT, self.DATEFMT)
+        log_handler.setFormatter(formatter)
+        self._logger.addHandler(log_handler)
+
+    def addFileHandler(self, logfile):
+        file_handler = logging.FileHandler(logfile, mode="a", encoding=None, delay=False)
+        formatter = logging.Formatter(self.FMT, self.DATEFMT)
+        file_handler.setFormatter(formatter)
+        self._logger.addHandler(file_handler)
+
+    def addConsoleHandler(self):
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter(self.FMT, self.DATEFMT)
+        stream_handler.setFormatter(formatter)
+        self._logger.addHandler(stream_handler)
+
+    def create(self):
+        return self._logger
+
+
+def check_dependency():
+    version = {
+        'rasusa': 'rasusa --version',
+        'nanoq': 'nanoq --version',
+        'filtlong': 'filtlong --version',
+        'flye': 'flye -v',
+        'medaka': 'medaka --version',
+        "KMC": "kmc | grep K-Mer",
+        'polypolish': 'polypolish --version',
+        'bwa-mem2': 'bwa-mem2 version 2> /dev/null',
+        'masurca': 'masurca --version',
+        'bwa': 'bwa 2>&1 | grep Version:',
+        }
+    logger = logging.getLogger(__name__)
+    for program_name, cmd in version.items():
+        p = syscall(cmd)
+        if p.returncode:
+            logger.error(msg=f"Could not determine version of {program_name}")
+            sys.exit("Abort")
+        else:
+            version = p.stdout.strip()
+            logger.info(msg=f"Using {program_name:11} | {version}")
+
+
+def print_used_values(args):
+    logger = logging.getLogger(__name__)
+    command = []
+    args = vars(args)
+    for argument, value in args.items():
+        if value:
+            command.append("--" + argument.replace('_', '-'))
+            if isinstance(value, bool) is False:
+                command.append(str(value))
+    command.insert(0, sys.argv[0])
+    logger.info("You ran: " + ' '.join(command))
+
+
+def initialize(args):
+    os.makedirs(args.outdir, exist_ok=True)
+    logfile = os.path.join(args.outdir, 'ouroboros.log')
+    logger_factory = LoggerFactory()
+    logger_factory.addFileHandler(logfile)
+    logger_factory.addConsoleHandler()
+    logger = logger_factory.create()
+    print_used_values(args)
+    check_dependency()
+    return logger
+
+
+def parse_genome_size(pattern):
+    logger = logging.getLogger(__name__)
+    unit_map = {'K': 1e3, 'M': 1e6, 'G': 1e9}
+    result = re.fullmatch(r'^([\d.]+)([KMG])', pattern)
+    if result is None:
+        logger.error(f"Couldn't parse {pattern}")
+        sys.exit("Aborted")
+    else:
+        value, unit = result.groups()
+        return int(float(value) * unit_map[unit])
+
+
+def subsampling(infile, outfile, gsize, depth):
+    bases = gsize * depth
+    cmd = ['rasusa', '-b', str(bases), '-i', infile, '-o', outfile]
+    syscall(cmd)
+
+
+def stats(seqfile):
+    cmd = ['nanoq', '-s', '-j', '-i', seqfile]
+    p = syscall(cmd)
+    result = json.loads(p.stdout)
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', '--infile', metavar='',
+                        required=True,
+                        help='Input Nanopore FASTQ')
+    parser.add_argument('-o', '--outdir', metavar='',
+                        required=True,
+                        help='Specify directory in which output has to be created.')
+    parser.add_argument('-t', '--num-threads', metavar='',
+                        default=1, type=int,
+                        help='Set the allowed number of threads to be used by the script (default: 1)')
+    parser.add_argument('--sr1', metavar='',
+                        help='Read 1 FASTQ to use for polishing')
+    parser.add_argument('--sr2', metavar='',
+                        help='Read 2 FASTQ to use for polishing')
+    parser.add_argument('--depth', metavar='',
+                        default=100, type=int,
+                        help='Sub-sample reads to this depth. Disable with --depth 0 (default: 100)')
+    parser.add_argument('--gsize', default=None, metavar='',
+                        help='Estimated genome size eg. 3.2M <blank=AUTO> (default: "")')
+    parser.add_argument('--meta', action='store_true',
+                        help='Metagenome / uneven coverage')
+    parser.add_argument('--model', default='r941_min_hac_g507', metavar='',
+                        help='The model to be used by Medaka (default: r941_min_hac_g507)')
+    parser.add_argument('--hq', action='store_true',
+                        help="Flye will use '--nano-hq' instead of --nano-raw")
+    args = parser.parse_args()
+    if (args.sr1 and not args.sr2) or (not args.sr1 and args.sr2):
+        parser.error("--sr1 and --sr2 must be used together")
+
+    logger = initialize(args)
+
+    if medaka_model_check(args.model) is False:
+        logger.error(f"Medaka model {args.model} unavailable")
+        sys.exit("Aborted")
+
+    if args.infile.endswith('.fastq.gz'):
+        reads = os.path.join(args.outdir, 'READS.fastq.gz')
+    elif args.infile.endswith('.fastq'):
+        reads = os.path.join(args.outdir, 'READS.fastq')
+    else:
+        sys.exit()
+    os.symlink(args.infile, reads)
+    stats_before_filter = stats(reads)
+    logger.info("Keep only 90 percentage of the best reads")
+    filt_reads = os.path.join(args.outdir, 'READS.flit.fastq')
+    syscall(f'filtlong --keep_percent 90 --mean_q_weight 10 {reads} > {filt_reads}')
+    reads = filt_reads
+    stats_after_filter = stats(reads)
+
+    index = ['reads', 'bases', 'n50', 'mean_length', 'median_length', 'mean_quality', 'median_quality']
+    data = [[i, stats_before_filter[i], stats_after_filter[i]] for i in index]
+    comparison = tabulate(data, headers=['', 'before filter', 'after filter'], floatfmt='.0f')
+    logger.info(f"""\n{comparison}\n""")
+
+    if not args.meta:
+        total_bases = stats_after_filter['bases']
+        if args.gsize:
+            gsize = parse_genome_size(args.gsize)
+            logger.info(f"Using genome size was {gsize}bp.")
+        else:
+            gsize = estimate_genome_size(reads, args.num_threads)
+            logger.info(f"Estimated genome size was {gsize}bp.")
+        origin_depth = total_bases / gsize
+        logger.info(f'Estimated sequencing depth: {origin_depth:.0f} x')
+        if args.depth:
+            if origin_depth > args.depth:
+                logger.info(f"Subsampling reads from {origin_depth:.0f}x to {args.depth}x.")
+                sub_reads = os.path.join(args.outdir, 'READS.sub.fastq')
+                subsampling(reads, sub_reads, gsize, args.depth)
+                reads = sub_reads
+            else:
+                logger.info("No read depth reduction requested or necessary.")
+    else:
+        logger.info("Flag '--meta' was be set, won't subsampling reads.")
+
+    logger.info("Assembling reads with Flye")
+    input_type = '--nano-hq' if args.hq else '--nano-raw'
+    flye_dir = os.path.join(args.outdir, 'flye')
+    flye_asm = os.path.join(flye_dir, 'assembly.fasta')
+    flye_cmd = ['flye', input_type, reads, '-o', flye_dir, '-t', str(args.num_threads)]
+    if args.meta:
+        flye_cmd += ['--meta']
+    p = syscall(flye_cmd)
+    if p.returncode:
+        logger.error("Assembly failed.")
+        sys.exit('Aborted')
+    shutil.copyfile(
+        flye_asm,
+        os.path.join(args.outdir, 'flye.fasta')
+    )
+    shutil.copyfile(
+        os.path.join(flye_dir, 'assembly_info.txt'),
+        os.path.join(args.outdir, 'flye_info.txt')
+    )
+    shutil.copyfile(
+        os.path.join(flye_dir, 'assembly_graph.gfa'),
+        os.path.join(args.outdir, 'flye-unpolished.gfa')
+    )
+    shutil.copyfile(
+        os.path.join(flye_dir, 'flye.log'),
+        os.path.join(args.outdir, 'flye.log')
+    )
+
+    logger.info("Polishing with Medaka")
+    medaka_dir = os.path.join(args.outdir, 'medaka')
+    medaka_asm = os.path.join(medaka_dir, 'consensus.fasta')
+    syscall(['medaka_consensus', '-i', filt_reads, '-d', flye_asm, '-o', medaka_dir, '-m', args.model, '-t', str(args.num_threads)])
+    shutil.copyfile(
+        medaka_asm,
+        os.path.join(args.outdir, 'medaka.fasta')
+    )
+    final_asm = os.path.join(args.outdir, 'contigs.fa')
+    os.symlink(os.path.join(args.outdir, 'medaka.fasta'), final_asm)
+    if args.sr1 and args.sr2:
+        hybrid_asm = os.path.join(args.outdir, 'hybrid.fasta')
+        logger.info("Polishing with Short reads")
+        molt(medaka_asm, args.sr1, args.sr2, hybrid_asm, args.num_threads)
+        os.unlink(final_asm)
+        os.symlink(hybrid_asm, final_asm)
+    shutil.rmtree(flye_dir)
+    shutil.rmtree(medaka_dir)
+    syscall(f"rm {os.path.join(args.outdir, 'READS.*')}")
+
+    logger.info("Done")
+
+
+if __name__ == '__main__':
+    main()
