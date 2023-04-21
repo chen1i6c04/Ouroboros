@@ -1,0 +1,11 @@
+name: ONT
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - flye
+  - medaka
+  - rasusa
+  - nanoq
+  - kmc
