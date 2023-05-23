@@ -6,8 +6,8 @@ import shutil
 import logging
 import argparse
 from tabulate import tabulate
-from modules.utils import syscall, medaka_model_check, estimate_genome_size
-from modules.molt import molt
+from Bio import SeqIO
+from modules.utils import syscall, medaka_model_check, estimate_genome_size, read_alignments
 
 
 class LoggerFactory:
@@ -103,17 +103,61 @@ def parse_genome_size(pattern):
         return int(float(value) * unit_map[unit])
 
 
+def run_filtlong(raw_reads, filtered_reads, min_length=0, min_quality=0):
+    if min_length or min_quality:
+        cmd = f'filtlong --min_length {min_length} --min_mean_q {min_quality} {raw_reads}> {filtered_reads}'
+    else:
+        cmd = f'filtlong --keep_percent 90 --mean_q_weight 10 {raw_reads} > {filtered_reads}'
+    syscall(cmd)
+
+
 def subsampling(infile, outfile, gsize, depth):
     bases = gsize * depth
     cmd = ['rasusa', '-b', str(bases), '-i', infile, '-o', outfile]
     syscall(cmd)
 
 
-def stats(seqfile):
+def nanoq_stats(seqfile):
     cmd = ['nanoq', '-s', '-j', '-i', seqfile]
     p = syscall(cmd)
     result = json.loads(p.stdout)
     return result
+
+
+def run_polca(assembly, short_reads_1, short_reads_2, output_dir, num_threads):
+    """
+    POLCA is a polishing tool in MaSuRCA (Maryland Super Read Cabog Assembler)
+    https://github.com/alekseyzimin/masurca#polca
+    """
+    assembly = os.path.abspath(assembly)
+    os.makedirs(output_dir, exist_ok=True)
+    os.chdir(output_dir)
+    cmd = f"polca.sh -a {assembly} -r '{short_reads_1} {short_reads_2}' -t {num_threads} 2>&1 | tee /dev/tty"
+    syscall(cmd)
+    os.remove(assembly + '.fai')
+
+
+def run_polypolish(assembly, short_reads_1, short_reads_2, output_dir, num_threads):
+    alignments_1 = os.path.join(output_dir, 'alignments_1.sam')
+    alignments_2 = os.path.join(output_dir, 'alignments_2.sam')
+    filtered_1 = os.path.join(output_dir, 'filtered_1.sam')
+    filtered_2 = os.path.join(output_dir, 'filtered_2.sam')
+    polypolish_output = os.path.join(output_dir, '3_polypolish.fasta')
+    read_alignments(assembly, short_reads_1, alignments_1, num_threads)
+    read_alignments(assembly, short_reads_2, alignments_2, num_threads)
+    cmd = f"polypolish_insert_filter.py " \
+          f"--in1 {alignments_1} --in2 {alignments_2} --out1 {filtered_1} --out2 {filtered_2} 2>&1 | tee /dev/tty"
+    syscall(cmd)
+    cmd = f"polypolish {assembly} {filtered_1} {filtered_2} 2>&1 1> {polypolish_output} | tee /dev/tty"
+    syscall(cmd)
+    for f in (alignments_1, alignments_2, filtered_1, filtered_2):
+        os.remove(f)
+    return polypolish_output
+
+
+def copyfile(src, dst):
+    records = sorted(SeqIO.parse(src, 'fasta'), key=lambda rec: rec.id)
+    SeqIO.write(records, dst, 'fasta')
 
 
 def main():
@@ -127,6 +171,12 @@ def main():
     parser.add_argument('-t', '--num-threads', metavar='',
                         default=1, type=int,
                         help='Set the allowed number of threads to be used by the script (default: 1)')
+    parser.add_argument('-l', '--min-length', metavar='',
+                        default=0, type=int,
+                        help='')
+    parser.add_argument('-q', '--min-quality', metavar='',
+                        default=0, type=int,
+                        help='')
     parser.add_argument('--sr1', metavar='',
                         help='Read 1 FASTQ to use for polishing')
     parser.add_argument('--sr2', metavar='',
@@ -143,8 +193,14 @@ def main():
     parser.add_argument('--hq', action='store_true',
                         help="Flye will use '--nano-hq' instead of --nano-raw")
     args = parser.parse_args()
+
+    short_reads_polishing = False
     if (args.sr1 and not args.sr2) or (not args.sr1 and args.sr2):
         parser.error("--sr1 and --sr2 must be used together")
+    elif args.sr1 and args.sr2:
+        short_reads_polishing = True
+    else:
+        pass
 
     logger = initialize(args)
 
@@ -159,17 +215,17 @@ def main():
     else:
         sys.exit()
     os.symlink(args.infile, reads)
-    stats_before_filter = stats(reads)
+    stats_before_filter = nanoq_stats(reads)
     logger.info("Keep only 90 percentage of the best reads")
     filt_reads = os.path.join(args.outdir, 'READS.flit.fastq')
-    syscall(f'filtlong --keep_percent 90 --mean_q_weight 10 {reads} > {filt_reads}')
+    run_filtlong(reads, filt_reads, args.min_length, args.min_quality)
     reads = filt_reads
-    stats_after_filter = stats(reads)
+    stats_after_filter = nanoq_stats(reads)
 
     index = ['reads', 'bases', 'n50', 'mean_length', 'median_length', 'mean_quality', 'median_quality']
     data = [[i, stats_before_filter[i], stats_after_filter[i]] for i in index]
     comparison = tabulate(data, headers=['', 'before filter', 'after filter'], floatfmt='.0f')
-    logger.info(f"""\n{comparison}\n""")
+    logger.info(f"""\n\n{comparison}\n""")
 
     if not args.meta:
         total_bases = stats_after_filter['bases']
@@ -203,19 +259,19 @@ def main():
     if p.returncode:
         logger.error("Assembly failed.")
         sys.exit('Aborted')
-    shutil.copyfile(
+    copyfile(
         flye_asm,
-        os.path.join(args.outdir, 'flye.fasta')
+        os.path.join(args.outdir, '1_flye.fasta')
     )
-    shutil.copyfile(
+    shutil.move(
         os.path.join(flye_dir, 'assembly_info.txt'),
         os.path.join(args.outdir, 'flye_info.txt')
     )
-    shutil.copyfile(
+    shutil.move(
         os.path.join(flye_dir, 'assembly_graph.gfa'),
         os.path.join(args.outdir, 'flye-unpolished.gfa')
     )
-    shutil.copyfile(
+    shutil.move(
         os.path.join(flye_dir, 'flye.log'),
         os.path.join(args.outdir, 'flye.log')
     )
@@ -224,22 +280,20 @@ def main():
     medaka_dir = os.path.join(args.outdir, 'medaka')
     medaka_asm = os.path.join(medaka_dir, 'consensus.fasta')
     syscall(['medaka_consensus', '-i', filt_reads, '-d', flye_asm, '-o', medaka_dir, '-m', args.model, '-t', str(args.num_threads)])
-    shutil.copyfile(
-        medaka_asm,
-        os.path.join(args.outdir, 'medaka.fasta')
-    )
-    final_asm = os.path.join(args.outdir, 'contigs.fa')
-    os.symlink(os.path.join(args.outdir, 'medaka.fasta'), final_asm)
-    if args.sr1 and args.sr2:
-        hybrid_asm = os.path.join(args.outdir, 'hybrid.fasta')
-        logger.info("Polishing with Short reads")
-        molt(medaka_asm, args.sr1, args.sr2, hybrid_asm, args.num_threads)
-        os.unlink(final_asm)
-        os.symlink(hybrid_asm, final_asm)
+    copyfile(medaka_asm, os.path.join(args.outdir, '2_medaka.fasta'))
+    if short_reads_polishing:
+        logger.info("Polishing with short reads")
+        polypolish_output = run_polypolish(medaka_asm, args.sr1, args.sr2, args.outdir, args.num_threads)
+        polca_dir = os.path.join(args.outdir, 'polca')
+        run_polca(polypolish_output, args.sr1, args.sr2, polca_dir, args.num_threads)
+        copyfile(
+            os.path.join(polca_dir, '3_polypolish.fasta.PolcaCorrected.fa'),
+            os.path.join(args.outdir, '4_polca.fasta')
+        )
+        shutil.rmtree(polca_dir)
     shutil.rmtree(flye_dir)
     shutil.rmtree(medaka_dir)
     syscall(f"rm {os.path.join(args.outdir, 'READS.*')}")
-
     logger.info("Done")
 
 

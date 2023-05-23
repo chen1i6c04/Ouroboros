@@ -26,5 +26,10 @@ def estimate_genome_size(fastq_file, num_threads):
             f"grep 'No. of unique counted k-mers' | "
             f"awk '{{print $NF}}'",
         ).stdout
-    return int(output.strip().split()[-1])
+    return int(output.strip())
+
+
+def read_alignments(assembly, short_reads, alignments, num_threads):
+    syscall(f"bwa-mem2 index {assembly}")
+    syscall(f"bwa-mem2 mem -t {num_threads} -a {assembly} {short_reads} > {alignments}")
 
