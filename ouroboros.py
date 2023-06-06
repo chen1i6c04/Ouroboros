@@ -3,43 +3,11 @@ import re
 import sys
 import json
 import shutil
-import logging
 import argparse
 from tabulate import tabulate
-from Bio import SeqIO
+from loguru import logger
 from modules.utils import syscall, medaka_model_check, estimate_genome_size, read_alignments
-
-
-class LoggerFactory:
-
-    FMT = "%(asctime)-20s[%(levelname)s] %(message)s"
-    DATEFMT = "%Y-%m-%d %H:%M:%S"
-
-    def __init__(self):
-        self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logging.INFO)
-
-    def addLogBoxHandler(self, logbox):
-        log_handler = logging.Handler(logbox)
-        formatter = logging.Formatter(self.FMT, self.DATEFMT)
-        log_handler.setFormatter(formatter)
-        self._logger.addHandler(log_handler)
-
-    def addFileHandler(self, logfile):
-        file_handler = logging.FileHandler(logfile, mode="a", encoding=None, delay=False)
-        formatter = logging.Formatter(self.FMT, self.DATEFMT)
-        file_handler.setFormatter(formatter)
-        self._logger.addHandler(file_handler)
-
-    def addConsoleHandler(self):
-        stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter(self.FMT, self.DATEFMT)
-        stream_handler.setFormatter(formatter)
-        self._logger.addHandler(stream_handler)
-
-    def create(self):
-        return self._logger
+from modules.assembly_process import reorient_assembly
 
 
 def check_dependency():
@@ -55,19 +23,17 @@ def check_dependency():
         'masurca': 'masurca --version',
         'bwa': 'bwa 2>&1 | grep Version:',
         }
-    logger = logging.getLogger(__name__)
     for program_name, cmd in version.items():
         p = syscall(cmd)
         if p.returncode:
-            logger.error(msg=f"Could not determine version of {program_name}")
+            logger.error(f"Could not determine version of {program_name}")
             sys.exit("Abort")
         else:
             version = p.stdout.strip()
-            logger.info(msg=f"Using {program_name:11} | {version}")
+            logger.info(f"Using {program_name:11} | {version}")
 
 
 def print_used_values(args):
-    logger = logging.getLogger(__name__)
     command = []
     args = vars(args)
     for argument, value in args.items():
@@ -82,17 +48,14 @@ def print_used_values(args):
 def initialize(args):
     os.makedirs(args.outdir, exist_ok=True)
     logfile = os.path.join(args.outdir, 'ouroboros.log')
-    logger_factory = LoggerFactory()
-    logger_factory.addFileHandler(logfile)
-    logger_factory.addConsoleHandler()
-    logger = logger_factory.create()
+    fmt = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
+    logger.add(logfile, format=fmt, level='INFO')
+    logger.add(sys.stderr, format=fmt, level='ERROR')
     print_used_values(args)
     check_dependency()
-    return logger
 
 
 def parse_genome_size(pattern):
-    logger = logging.getLogger(__name__)
     unit_map = {'K': 1e3, 'M': 1e6, 'G': 1e9}
     result = re.fullmatch(r'^([\d.]+)([KMG])', pattern)
     if result is None:
@@ -103,10 +66,12 @@ def parse_genome_size(pattern):
         return int(float(value) * unit_map[unit])
 
 
-def run_filtlong(raw_reads, filtered_reads, min_length=0, min_quality=0):
+def reads_filter(raw_reads, filtered_reads, min_length=0, min_quality=0):
     if min_length or min_quality:
-        cmd = f'filtlong --min_length {min_length} --min_mean_q {min_quality} {raw_reads}> {filtered_reads}'
+        logger.info(f"Filter out reads length less than {min_length} and average quality score less {min_quality}")
+        cmd = f'nanoq -l {min_length} -q {min_quality} -i {raw_reads} > {filtered_reads}'
     else:
+        logger.info("Keep only 90 percentage of the best reads")
         cmd = f'filtlong --keep_percent 90 --mean_q_weight 10 {raw_reads} > {filtered_reads}'
     syscall(cmd)
 
@@ -124,6 +89,7 @@ def nanoq_stats(seqfile):
     return result
 
 
+@logger.catch
 def run_polca(assembly, short_reads_1, short_reads_2, output_dir, num_threads):
     """
     POLCA is a polishing tool in MaSuRCA (Maryland Super Read Cabog Assembler)
@@ -132,7 +98,7 @@ def run_polca(assembly, short_reads_1, short_reads_2, output_dir, num_threads):
     assembly = os.path.abspath(assembly)
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
-    cmd = f"polca.sh -a {assembly} -r '{short_reads_1} {short_reads_2}' -t {num_threads} 2>&1 | tee /dev/tty"
+    cmd = f"polca.sh -a {assembly} -r '{short_reads_1} {short_reads_2}' -t {num_threads}"
     syscall(cmd)
     os.remove(assembly + '.fai')
 
@@ -146,18 +112,13 @@ def run_polypolish(assembly, short_reads_1, short_reads_2, output_dir, num_threa
     read_alignments(assembly, short_reads_1, alignments_1, num_threads)
     read_alignments(assembly, short_reads_2, alignments_2, num_threads)
     cmd = f"polypolish_insert_filter.py " \
-          f"--in1 {alignments_1} --in2 {alignments_2} --out1 {filtered_1} --out2 {filtered_2} 2>&1 | tee /dev/tty"
+          f"--in1 {alignments_1} --in2 {alignments_2} --out1 {filtered_1} --out2 {filtered_2}"
     syscall(cmd)
-    cmd = f"polypolish {assembly} {filtered_1} {filtered_2} 2>&1 1> {polypolish_output} | tee /dev/tty"
+    cmd = f"polypolish {assembly} {filtered_1} {filtered_2} > {polypolish_output}"
     syscall(cmd)
     for f in (alignments_1, alignments_2, filtered_1, filtered_2):
         os.remove(f)
     return polypolish_output
-
-
-def copyfile(src, dst):
-    records = sorted(SeqIO.parse(src, 'fasta'), key=lambda rec: rec.id)
-    SeqIO.write(records, dst, 'fasta')
 
 
 def main():
@@ -202,7 +163,7 @@ def main():
     else:
         pass
 
-    logger = initialize(args)
+    initialize(args)
 
     if medaka_model_check(args.model) is False:
         logger.error(f"Medaka model {args.model} unavailable")
@@ -216,9 +177,8 @@ def main():
         sys.exit()
     os.symlink(args.infile, reads)
     stats_before_filter = nanoq_stats(reads)
-    logger.info("Keep only 90 percentage of the best reads")
     filt_reads = os.path.join(args.outdir, 'READS.flit.fastq')
-    run_filtlong(reads, filt_reads, args.min_length, args.min_quality)
+    reads_filter(reads, filt_reads, args.min_length, args.min_quality)
     reads = filt_reads
     stats_after_filter = nanoq_stats(reads)
 
@@ -255,12 +215,24 @@ def main():
     flye_cmd = ['flye', input_type, reads, '-o', flye_dir, '-t', str(args.num_threads)]
     if args.meta:
         flye_cmd += ['--meta']
+    logger.info(f"Flye command: {' '.join(flye_cmd)}")
     p = syscall(flye_cmd)
     if p.returncode:
         logger.error("Assembly failed.")
         sys.exit('Aborted')
-    copyfile(
+
+    logger.info("Rotate circular sequences.")
+    reorient_dir = os.path.join(args.outdir, 'reorient')
+    reoriented_assembly = os.path.join(reorient_dir, 'assembly.fasta')
+    reorient_assembly(
         flye_asm,
+        os.path.join(flye_dir, 'assembly_info.txt'),
+        reorient_dir,
+        args.num_threads
+    )
+
+    shutil.copyfile(
+        reoriented_assembly,
         os.path.join(args.outdir, '1_flye.fasta')
     )
     shutil.move(
@@ -276,23 +248,27 @@ def main():
         os.path.join(args.outdir, 'flye.log')
     )
 
-    logger.info("Polishing with Medaka")
+    logger.info("Polishing with medaka.")
     medaka_dir = os.path.join(args.outdir, 'medaka')
     medaka_asm = os.path.join(medaka_dir, 'consensus.fasta')
-    syscall(['medaka_consensus', '-i', filt_reads, '-d', flye_asm, '-o', medaka_dir, '-m', args.model, '-t', str(args.num_threads)])
-    copyfile(medaka_asm, os.path.join(args.outdir, '2_medaka.fasta'))
+    cmd = ['medaka_consensus', '-i', filt_reads, '-d', reoriented_assembly, '-o', medaka_dir, '-m', args.model, '-t', str(args.num_threads)]
+    syscall(cmd)
+
+    shutil.copyfile(medaka_asm, os.path.join(args.outdir, '2_medaka.fasta'))
+
     if short_reads_polishing:
         logger.info("Polishing with short reads")
         polypolish_output = run_polypolish(medaka_asm, args.sr1, args.sr2, args.outdir, args.num_threads)
         polca_dir = os.path.join(args.outdir, 'polca')
         run_polca(polypolish_output, args.sr1, args.sr2, polca_dir, args.num_threads)
-        copyfile(
+        shutil.copyfile(
             os.path.join(polca_dir, '3_polypolish.fasta.PolcaCorrected.fa'),
             os.path.join(args.outdir, '4_polca.fasta')
         )
         shutil.rmtree(polca_dir)
     shutil.rmtree(flye_dir)
     shutil.rmtree(medaka_dir)
+    shutil.rmtree(reorient_dir)
     syscall(f"rm {os.path.join(args.outdir, 'READS.*')}")
     logger.info("Done")
 

@@ -1,6 +1,7 @@
 import sys
 import subprocess
 from tempfile import TemporaryDirectory
+from loguru import logger
 
 
 def syscall(cmd):
@@ -9,14 +10,15 @@ def syscall(cmd):
         cmd, shell=shell, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
     )
     if child_process.returncode:
-        sys.exit(f"Command {cmd} is fail")
+        logger.error(f"Command {cmd} is fail")
+        sys.exit('Abort')
     return child_process
 
 
 def medaka_model_check(model):
     output = syscall(['medaka', 'tools', 'list_models']).stdout
-    model_list = set(output.splitlines()[0].replace('Available: ', '').split(', '))
-    return model in model_list
+    available_models = set(output.splitlines()[0].replace('Available: ', '').split(', '))
+    return model in available_models
 
 
 def estimate_genome_size(fastq_file, num_threads):
@@ -32,4 +34,3 @@ def estimate_genome_size(fastq_file, num_threads):
 def read_alignments(assembly, short_reads, alignments, num_threads):
     syscall(f"bwa-mem2 index {assembly}")
     syscall(f"bwa-mem2 mem -t {num_threads} -a {assembly} {short_reads} > {alignments}")
-
