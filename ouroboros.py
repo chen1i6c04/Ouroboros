@@ -10,6 +10,10 @@ from modules.utils import syscall, medaka_model_check, estimate_genome_size, rea
 from modules.assembly_process import reorient_assembly
 
 
+current_location = os.path.dirname(os.path.abspath(__file__))
+bin_path = os.path.join(current_location, 'bin')
+
+
 def check_dependency():
     version = {
         'rasusa': 'rasusa --version',
@@ -20,7 +24,7 @@ def check_dependency():
         "KMC": "kmc | grep K-Mer",
         'polypolish': 'polypolish --version',
         'bwa-mem2': 'bwa-mem2 version 2> /dev/null',
-        'masurca': 'masurca --version',
+        'masurca': f'{os.path.join(bin_path, "masurca")} --version',
         'bwa': 'bwa 2>&1 | grep Version:',
         }
     for program_name, cmd in version.items():
@@ -96,9 +100,10 @@ def run_polca(assembly, short_reads_1, short_reads_2, output_dir, num_threads):
     https://github.com/alekseyzimin/masurca#polca
     """
     assembly = os.path.abspath(assembly)
+    program = os.path.join(bin_path, 'polca.sh')
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
-    cmd = f"polca.sh -a {assembly} -r '{short_reads_1} {short_reads_2}' -t {num_threads}"
+    cmd = f"{program} -a {assembly} -r '{short_reads_1} {short_reads_2}' -t {num_threads}"
     syscall(cmd)
     os.remove(assembly + '.fai')
 
