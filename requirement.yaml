@@ -4,12 +4,12 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - pandas
-  - biopython
-  - tabulate
-  - loguru
-  - flye
-  - medaka
-  - rasusa
-  - nanoq
-  - kmc
+  - pandas=1.5.3
+  - biopython=1.78
+  - tabulate=0.8.10
+  - loguru=0.5.3
+  - flye=2.9.2
+  - medaka=1.8.0
+  - rasusa=0.7.1
+  - nanoq=0.10.0
+  - kmc=3.2.1
