@@ -4,6 +4,10 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - pandas
+  - biopython
+  - tabulate
+  - loguru
   - flye
   - medaka
   - rasusa

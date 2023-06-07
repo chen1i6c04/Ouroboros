@@ -26,7 +26,7 @@ def check_dependency():
         'bwa-mem2': 'bwa-mem2 version 2> /dev/null',
         'masurca': f'{os.path.join(bin_path, "masurca")} --version',
         'bwa': 'bwa 2>&1 | grep Version:',
-        }
+    }
     for program_name, cmd in version.items():
         p = syscall(cmd)
         if p.returncode:
