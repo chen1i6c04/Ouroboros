@@ -11,7 +11,7 @@ from modules.assembly_process import reorient_assembly
 
 
 current_location = os.path.dirname(os.path.abspath(__file__))
-bin_path = os.path.join(current_location, 'bin')
+masurca_bin = os.path.join(current_location, 'MaSuRCA', 'bin')
 
 
 def check_dependency():
@@ -24,7 +24,7 @@ def check_dependency():
         "KMC": "kmc | grep K-Mer",
         'polypolish': 'polypolish --version',
         'bwa-mem2': 'bwa-mem2 version 2> /dev/null',
-        'masurca': f'{os.path.join(bin_path, "masurca")} --version',
+        'masurca': f'{os.path.join(masurca_bin, "masurca")} --version',
         'bwa': 'bwa 2>&1 | grep Version:',
     }
     for program_name, cmd in version.items():
@@ -100,7 +100,7 @@ def run_polca(assembly, short_reads_1, short_reads_2, output_dir, num_threads):
     https://github.com/alekseyzimin/masurca#polca
     """
     assembly = os.path.abspath(assembly)
-    program = os.path.join(bin_path, 'polca.sh')
+    program = os.path.join(masurca_bin, 'polca.sh')
     os.makedirs(output_dir, exist_ok=True)
     os.chdir(output_dir)
     cmd = f"{program} -a {assembly} -r '{short_reads_1} {short_reads_2}' -t {num_threads}"
@@ -148,14 +148,14 @@ def main():
     parser.add_argument('--sr2', metavar='',
                         help='Read 2 FASTQ to use for polishing')
     parser.add_argument('--depth', metavar='',
-                        default=100, type=int,
-                        help='Sub-sample reads to this depth. Disable with --depth 0 (default: 100)')
+                        default=50, type=int,
+                        help='Sub-sample reads to this depth. Disable with --depth 0 (default: 50)')
     parser.add_argument('--gsize', default=None, metavar='',
                         help='Estimated genome size eg. 3.2M <blank=AUTO> (default: "")')
     parser.add_argument('--meta', action='store_true',
                         help='Metagenome / uneven coverage')
-    parser.add_argument('--model', default='r941_min_hac_g507', metavar='',
-                        help='The model to be used by Medaka (default: r941_min_hac_g507)')
+    parser.add_argument('--model', default='r1041_e82_400bps_sup_g615', metavar='',
+                        help='The model to be used by Medaka (default: r1041_e82_400bps_sup_g615)')
     parser.add_argument('--hq', action='store_true',
                         help="Flye will use '--nano-hq' instead of --nano-raw")
     args = parser.parse_args()

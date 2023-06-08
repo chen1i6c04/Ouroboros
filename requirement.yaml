@@ -13,3 +13,5 @@ dependencies:
   - rasusa=0.7.1
   - nanoq=0.10.0
   - kmc=3.2.1
+  - polypolish=0.5.0
+  - bwa-mem2=2.2.1
