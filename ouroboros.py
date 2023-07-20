@@ -4,7 +4,8 @@ import sys
 import json
 import shutil
 import argparse
-from tabulate import tabulate
+
+import pandas as pd
 from loguru import logger
 from modules.utils import syscall, medaka_model_check, estimate_genome_size, read_alignments
 from modules.assembly_process import reorient_assembly
@@ -70,7 +71,10 @@ def parse_genome_size(pattern):
         return int(float(value) * unit_map[unit])
 
 
-def reads_filter(raw_reads, filtered_reads, min_length=0, min_quality=0):
+def reads_filter(raw_reads, filtered_reads, min_length=0, min_quality=0, no_filter=False):
+    if no_filter:
+        logger.info("No read filtering requested or necessary.")
+        os.symlink(raw_reads, filtered_reads)
     if min_length or min_quality:
         logger.info(f"Filter out reads length less than {min_length} and average quality score less {min_quality}")
         cmd = f'nanoq -l {min_length} -q {min_quality} -i {raw_reads} > {filtered_reads}'
@@ -86,11 +90,18 @@ def subsampling(infile, outfile, gsize, depth):
     syscall(cmd)
 
 
-def nanoq_stats(seqfile):
+def reads_scan(seqfile):
     cmd = ['nanoq', '-s', '-j', '-i', seqfile]
     p = syscall(cmd)
     result = json.loads(p.stdout)
     return result
+
+
+def compare(before, after, outfile):
+    index = ['reads', 'bases', 'n50', 'mean_length', 'median_length', 'mean_quality', 'median_quality']
+    data = [(before[i], after[i]) for i in index]
+    df = pd.DataFrame(data, index=index, columns=['before', 'after'])
+    df.to_csv(outfile, sep='\t')
 
 
 @logger.catch
@@ -143,6 +154,8 @@ def main():
     parser.add_argument('-q', '--min-quality', metavar='',
                         default=0, type=int,
                         help='')
+    parser.add_argument('--nofilter', action='store_true', default=False,
+                        help='Disable read length filtering')
     parser.add_argument('--sr1', metavar='',
                         help='Read 1 FASTQ to use for polishing')
     parser.add_argument('--sr2', metavar='',
@@ -181,19 +194,16 @@ def main():
     else:
         sys.exit()
     os.symlink(args.infile, reads)
-    stats_before_filter = nanoq_stats(reads)
+    before_filter = reads_scan(reads)
     filt_reads = os.path.join(args.outdir, 'READS.flit.fastq')
-    reads_filter(reads, filt_reads, args.min_length, args.min_quality)
+    reads_filter(reads, filt_reads, args.min_length, args.min_quality, args.nofilter)
     reads = filt_reads
-    stats_after_filter = nanoq_stats(reads)
+    after_filter = reads_scan(reads)
 
-    index = ['reads', 'bases', 'n50', 'mean_length', 'median_length', 'mean_quality', 'median_quality']
-    data = [[i, stats_before_filter[i], stats_after_filter[i]] for i in index]
-    comparison = tabulate(data, headers=['', 'before filter', 'after filter'], floatfmt='.0f')
-    logger.info(f"""\n\n{comparison}\n""")
+    compare(before_filter, after_filter, os.path.join(args.outdir, 'filter_result.txt'))
 
     if not args.meta:
-        total_bases = stats_after_filter['bases']
+        total_bases = after_filter['bases']
         if args.gsize:
             gsize = parse_genome_size(args.gsize)
             logger.info(f"Using genome size was {gsize}bp.")
