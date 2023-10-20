@@ -192,7 +192,12 @@ def main():
     if args.contaminants:
         logger.info("Clean contaminants.")
         cleaned_reads = os.path.join(args.outdir, 'READS_clean.fastq.gz')
-        exclude_target_from_single_end(interm_reads, interm_reads, args.contaminants, args.num_threads)
+        exclude_target_from_single_end(
+            input_reads=interm_reads,
+            output_reads=cleaned_reads,
+            target=args.contaminants,
+            threads=args.num_threads
+        )
         interm_reads = cleaned_reads
     cmd = f'nanoq -s -j -i {interm_reads}'
     p = syscall(cmd, stdout=True)
