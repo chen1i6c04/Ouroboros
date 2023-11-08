@@ -66,8 +66,7 @@ def parse_genome_size(pattern):
         value, unit = result.groups()
         return int(float(value) * unit_map[unit])
 
-
-def reads_filter(input_file, output_file, min_length=0, min_quality=0, keep_percent=95):
+def reads_filter(input_file, output_file, min_length=0, min_quality=0, keep_percent=90):
     if min_length or min_quality:
         logger.info(f"Filter out reads length less than {min_length} and average quality score less {min_quality}")
         cmd = f'filtlong --min_length {min_length} --min_mean_q {min_quality} {input_file}'
@@ -151,8 +150,10 @@ def main():
                         help='Estimated genome size eg. 3.2M <blank=AUTO> (default: "")')
     parser.add_argument('--meta', action='store_true',
                         help='Metagenome / uneven coverage')
-    parser.add_argument('--model', default='r1041_e82_400bps_sup_g615', metavar='',
+    parser.add_argument('--medaka_model', default='r1041_e82_400bps_sup_g615', metavar='',
                         help='The model to be used by Medaka (default: r1041_e82_400bps_sup_g615)')
+    parser.add_argument('--medaka_opt', metavar='', nargs='+',
+                        help='Additional options to be given to Medaka')
     parser.add_argument('--hq', action='store_true',
                         help="Flye will use '--nano-hq' instead of --nano-raw")
     parser.add_argument('--contaminants', metavar='',
@@ -169,8 +170,8 @@ def main():
 
     initialize(args)
 
-    if medaka_model_check(args.model) is False:
-        logger.error(f"Medaka model {args.model} unavailable")
+    if medaka_model_check(args.medaka_model) is False:
+        logger.error(f"Medaka model {args.medaka_model} unavailable")
         sys.exit("Aborted")
 
     if not os.access(args.infile, os.R_OK):
@@ -262,7 +263,10 @@ def main():
     logger.info("Polishing with medaka.")
     medaka_dir = os.path.join(args.outdir, 'medaka')
     medaka_asm = os.path.join(medaka_dir, 'consensus.fasta')
-    cmd = ['medaka_consensus', '-i', interm_reads, '-d', flye_asm, '-o', medaka_dir, '-m', args.model, '-t', str(args.num_threads)]
+    cmd = ['medaka_consensus', '-i', interm_reads, '-d', flye_asm, '-o', medaka_dir, '-m', args.medaka_model, '-t', str(args.num_threads)]
+    if args.medaka_opt:
+        cmd += args.medaka_opt
+    logger.info(' '.join(cmd))
     syscall(cmd)
     shutil.copyfile(medaka_asm, os.path.join(args.outdir, '2_medaka.fasta'))
 

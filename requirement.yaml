@@ -16,5 +16,5 @@ dependencies:
   - kmc=3.2.1
   - polypolish=0.5.0
   - bwa-mem2=2.2.1
-  - pypolca
+  - pypolca=0.2.0
   - filtlong

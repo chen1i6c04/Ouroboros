@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from loguru import logger
 
 
-def syscall(cmd, stdout=False, stderr=False):
+def syscall(cmd, stdout=False, stderr=True):
     if stdout:
         stdout_str = subprocess.PIPE
     else:
@@ -20,6 +20,7 @@ def syscall(cmd, stdout=False, stderr=False):
     )
     if child_process.returncode:
         logger.error(f"Command {cmd} is fail")
+        logger.error(child_process.stderr)
         sys.exit('Abort')
     return child_process
 
