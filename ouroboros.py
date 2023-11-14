@@ -66,7 +66,8 @@ def parse_genome_size(pattern):
         value, unit = result.groups()
         return int(float(value) * unit_map[unit])
 
-def reads_filter(input_file, output_file, min_length=0, min_quality=0, keep_percent=90):
+
+def long_reads_filter(input_file, output_file, min_length=0, min_quality=0, keep_percent=90):
     if min_length or min_quality:
         logger.info(f"Filter out reads length less than {min_length} and average quality score less {min_quality}")
         cmd = f'filtlong --min_length {min_length} --min_mean_q {min_quality} {input_file}'
@@ -74,6 +75,14 @@ def reads_filter(input_file, output_file, min_length=0, min_quality=0, keep_perc
         logger.info(f"Keep only {keep_percent} percentage of the best reads")
         cmd = f'filtlong --keep_percent {keep_percent} {input_file}'
     cmd += f' | pigz > {output_file}'
+    syscall(cmd)
+
+
+def short_reads_trimming(input_1, input_2, output_1, output_2, threads):
+    cmd = [
+        'fastp', '-i', input_1, '-I', input_2, '-o', output_1, '-O', output_2,
+        '--thread', str(threads), '--detect_adapter_for_pe', '-j', '/dev/null', '-h', '/dev/null', '-t', '1',
+    ]
     syscall(cmd)
 
 
@@ -188,7 +197,7 @@ def main():
     interm_reads = raw_reads
     if not args.nofilter:
         filtered_reads = os.path.join(args.outdir, 'READS_filter.fastq.gz')
-        reads_filter(interm_reads, filtered_reads, args.min_length, args.min_quality)
+        long_reads_filter(interm_reads, filtered_reads, args.min_length, args.min_quality)
         interm_reads = filtered_reads
     if args.contaminants:
         logger.info("Clean contaminants.")
@@ -271,10 +280,13 @@ def main():
     shutil.copyfile(medaka_asm, os.path.join(args.outdir, '2_medaka.fasta'))
 
     if short_reads_polishing:
+        logger.info("Trimming short reads")
+        trim_1, trim_2 = os.path.join(args.outdir, 'R1.trim.fastq'), os.path.join(args.outdir, 'R2.trim.fastq')
+        short_reads_trimming(args.short_1, args.short_2, trim_1, trim_2, args.num_threads)
         logger.info("Polishing with short reads")
-        polypolish_output = run_polypolish(medaka_asm, args.short_1, args.short_2, args.outdir, args.num_threads)
+        polypolish_output = run_polypolish(medaka_asm, trim_1, trim_2, args.outdir, args.num_threads)
         polca_dir = os.path.join(args.outdir, 'polca')
-        run_polca(polypolish_output, args.short_1, args.short_2, polca_dir, args.num_threads)
+        run_polca(polypolish_output, trim_1, trim_2, polca_dir, args.num_threads)
         shutil.copyfile(
             os.path.join(polca_dir, 'polca_corrected.fasta'),
             os.path.join(args.outdir, '4_polca.fasta')
