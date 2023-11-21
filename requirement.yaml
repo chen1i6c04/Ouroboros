@@ -18,3 +18,5 @@ dependencies:
   - bwa-mem2=2.2.1
   - pypolca=0.2.0
   - filtlong
+  - porechop
+  - dnaapler=0.4.0
