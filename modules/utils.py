@@ -1,6 +1,10 @@
+import os
 import sys
+import gzip
+import json
 import subprocess
 from tempfile import TemporaryDirectory
+from Bio import SeqIO
 from loguru import logger
 
 
@@ -13,8 +17,7 @@ def syscall(cmd, stdout=False, stderr=True):
         stderr_str = subprocess.PIPE
     else:
         stderr_str = None
-    shell = True if isinstance(cmd, str) else False
-    executable = "/bin/bash" if shell else None
+    shell, executable = (True, "/bin/bash") if isinstance(cmd, str) else (False, None)
     child_process = subprocess.run(
         cmd, shell=shell, stdout=stdout_str, stderr=stderr_str, universal_newlines=True, executable=executable,
     )
@@ -25,10 +28,44 @@ def syscall(cmd, stdout=False, stderr=True):
     return child_process
 
 
-def medaka_model_check(model):
+def validate_medaka_model(model):
     output = syscall(['medaka', 'tools', 'list_models'], stdout=True).stdout
     available_models = set(output.splitlines()[0].replace('Available: ', '').split(', '))
-    return model in available_models
+    if not (model in available_models):
+        logger.error(f"Medaka model {model} unavailable")
+        sys.exit('Abort')
+
+
+def validate_fastq(file):
+    """Checks the input fastq is really a fastq
+        :param file: fastq file
+    :return: zipped - Boolean whether the input fastq is gzipped.
+    """
+
+    # to get extension
+    filename, file_extension = os.path.splitext(file)
+    if file_extension == ".gz":
+        # if gzipped
+        with gzip.open(file, "rt") as handle:
+            fastq = SeqIO.parse(handle, "fastq")
+            if any(fastq):
+                logger.info(f"FASTQ {file} checked")
+            else:
+                logger.error(f"Input file {file} is not in the FASTQ format.")
+                sys.exit('Abort')
+    else:
+        with open(file, "r") as handle:
+            fastq = SeqIO.parse(handle, "fastq")
+            if any(fastq):
+                logger.info(f"FASTQ {file} checked")
+            else:
+                logger.error(f"Input file {file} is not in the FASTQ format.")
+                sys.exit('Abort')
+
+
+def fastq_scan(file):
+    p = syscall(f"nanoq -s -f -j -i {file}", stdout=True)
+    return json.loads(p.stdout)
 
 
 def estimate_genome_size(fastq_file, num_threads):
@@ -39,11 +76,6 @@ def estimate_genome_size(fastq_file, num_threads):
             f"awk '{{print $NF}}'", stdout=True
         ).stdout
     return int(output.strip())
-
-
-def read_alignments(assembly, short_reads, alignments, num_threads):
-    syscall(f"bwa-mem2 index {assembly}")
-    syscall(f"bwa-mem2 mem -t {num_threads} -a {assembly} {short_reads} > {alignments}")
 
 
 def exclude_target_from_single_end(input_reads, output_reads, target, threads):

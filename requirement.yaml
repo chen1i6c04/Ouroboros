@@ -4,10 +4,9 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.10
+  - python
   - pandas>=1.5.3
   - biopython>=1.78
-  - tabulate=0.8.10
   - loguru=0.5.3
   - flye=2.9.2
   - medaka>=1.8.0
@@ -19,4 +18,5 @@ dependencies:
   - pypolca=0.2.0
   - filtlong
   - porechop
-  - dnaapler=0.4.0
+  - dnaapler>=0.4.0
+  - plassembler=1.5.0
