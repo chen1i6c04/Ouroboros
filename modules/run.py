@@ -79,6 +79,7 @@ def run_medaka(assembly, reads, outdir, model, options, threads):
     cmd = f"medaka_consensus -i {reads} -d {assembly} -o {outdir} -m {model} -t {threads}"
     if options:
         cmd += f" {options}"
+    logger.info("Medaka command: " + cmd)
     syscall(cmd)
     return os.path.join(outdir, 'consensus.fasta')
 

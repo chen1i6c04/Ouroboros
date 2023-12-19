@@ -9,7 +9,7 @@ dependencies:
   - biopython>=1.78
   - loguru=0.5.3
   - flye=2.9.2
-  - medaka>=1.8.0
+  - medaka>=1.11.3
   - rasusa=0.7.1
   - nanoq=0.10.0
   - kmc=3.2.1

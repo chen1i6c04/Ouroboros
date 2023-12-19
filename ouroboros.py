@@ -148,8 +148,8 @@ def main():
                         help='Estimated genome size eg. 3.2M <blank=AUTO> (default: "")')
     parser.add_argument('--meta', action='store_true',
                         help='Metagenome / uneven coverage')
-    parser.add_argument('--medaka_model', default='r1041_e82_400bps_sup_g615',
-                        help='The model to be used by Medaka (default: r1041_e82_400bps_sup_g615)')
+    parser.add_argument('--medaka_model', default='r1041_e82_400bps_sup_v4.3.0',
+                        help='The model to be used by Medaka (default: r1041_e82_400bps_sup_v4.3.0)')
     parser.add_argument('--medaka_opt',
                         help='Additional options to be given to Medaka')
     parser.add_argument('--hq', action='store_true',
