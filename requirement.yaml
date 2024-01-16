@@ -15,7 +15,7 @@ dependencies:
   - kmc=3.2.1
   - polypolish=0.5.0
   - bwa-mem2=2.2.1
-  - pypolca=0.2.0
+  - pypolca=0.2.1
   - filtlong
   - porechop
   - dnaapler>=0.4.0
