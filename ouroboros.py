@@ -146,8 +146,6 @@ def main():
                         help='Sub-sample reads to this depth. Disable with --depth 0 (default: 50)')
     parser.add_argument('-g', '--gsize', default=None, metavar='',
                         help='Estimated genome size eg. 3.2M <blank=AUTO> (default: "")')
-    parser.add_argument('--meta', action='store_true',
-                        help='Metagenome / uneven coverage')
     parser.add_argument('--medaka_model', default='r1041_e82_400bps_sup_v4.3.0',
                         help='The model to be used by Medaka (default: r1041_e82_400bps_sup_v4.3.0)')
     parser.add_argument('--medaka_opt',
@@ -156,8 +154,6 @@ def main():
                         help="Flye will use '--nano-hq' instead of --nano-raw")
     parser.add_argument('--contaminants',
                         help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.')
-    parser.add_argument('--plasmids',
-                        help='Run Plassembler assemble plasmids.')
     args = parser.parse_args()
 
     if (args.short_1 and not args.short_2) or (not args.short_1 and args.short_2):
