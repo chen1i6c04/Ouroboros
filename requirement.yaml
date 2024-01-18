@@ -1,4 +1,4 @@
-name: ONT
+name: ouroboros
 channels:
   - bioconda
   - conda-forge

@@ -12,7 +12,8 @@ from modules.utils import (syscall,
                            fastq_scan)
 from modules.run import run_polypolish, run_dnaapler, run_polca, run_flye, run_medaka, run_plassembler
 
-LOCATION = os.path.dirname(os.path.abspath(__file__))
+__location__ = os.path.dirname(os.path.abspath(__file__))
+__version__ = 'v0.0.1'
 
 
 def check_dependency():
@@ -122,7 +123,7 @@ def subsampling(infile, outfile, gsize, depth):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog="Ouroboros")
     parser.add_argument('-i', '--infile',
                         required=True,
                         help='Input Nanopore FASTQ')
@@ -142,18 +143,17 @@ def main():
     parser.add_argument('--notrim', action='store_true', default=False,
                         help='Disable long reads trimming.')
     parser.add_argument('-x', '--depth',
-                        default=50, type=int,
-                        help='Sub-sample reads to this depth. Disable with --depth 0 (default: 50)')
+                        default=100, type=int,
+                        help='Sub-sample reads to this depth. Disable with --depth 0 (default: 100)')
     parser.add_argument('-g', '--gsize', default=None, metavar='',
                         help='Estimated genome size eg. 3.2M <blank=AUTO> (default: "")')
     parser.add_argument('--medaka_model', default='r1041_e82_400bps_sup_v4.3.0',
                         help='The model to be used by Medaka (default: r1041_e82_400bps_sup_v4.3.0)')
-    parser.add_argument('--medaka_opt',
-                        help='Additional options to be given to Medaka')
     parser.add_argument('--hq', action='store_true',
                         help="Flye will use '--nano-hq' instead of --nano-raw")
     parser.add_argument('--contaminants',
                         help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.')
+    parser.add_argument('-v','--version', action='version', version=__version__)
     args = parser.parse_args()
 
     if (args.short_1 and not args.short_2) or (not args.short_1 and args.short_2):
@@ -256,7 +256,7 @@ def main():
         plassembler_dir = os.path.join(args.outdir, 'plassembler')
         chromosome, plasmids = run_plassembler(
             long=sub_reads, short_1=trim_1, short_2=trim_2, outdir=plassembler_dir, flye_asm=medaka_asm,
-            flye_info=flye_info, threads=args.num_threads, database=os.path.join(LOCATION, 'plassembler_db')
+            flye_info=flye_info, threads=args.num_threads, database=os.path.join(__location__, 'plassembler_db')
         )
         plassembler_asm = os.path.join(args.outdir, '3_plassembler.fasta')
         syscall(f"cat {chromosome} {plasmids} > {plassembler_asm}")
@@ -267,7 +267,7 @@ def main():
         plassembler_dir = os.path.join(args.outdir, 'plassembler')
         chromosome, plasmids = run_plassembler(
             long=sub_reads, outdir=plassembler_dir, flye_asm=medaka_asm, flye_info=flye_info, threads=args.num_threads,
-            database=os.path.join(LOCATION, 'plassembler_db')
+            database=os.path.join(__location__, 'plassembler_db')
         )
         plassembler_asm = os.path.join(args.outdir, '3_plassembler.fasta')
         syscall(f"cat {chromosome} {plasmids} > {plassembler_asm}")
