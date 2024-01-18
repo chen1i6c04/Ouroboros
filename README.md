@@ -1,4 +1,4 @@
-<p align="center"><img src="misc/ouroboros.png" alt="ouroboros" width="600"></p>
+<p align="center"><img src="misc/ouroboros.png" alt="ouroboros" width="300"></p>
 <p align="center"><a href="https://www.flaticon.com/free-icons/snake" title="snake icons">Snake icons created by Freepik - Flaticon</a></p>
 
 # Introduction
