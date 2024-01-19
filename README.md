@@ -3,7 +3,14 @@
 
 # Introduction
 Ouroboros is a simple assembly pipeline for bacterial isolate genome with nanopore sequence.
-It is based on Ryan Wick's [tutorial](https://github.com/rrwick/Perfect-bacterial-genome-tutorial) and reference to other tools such as [dragonflye](https://github.com/rpetit3/dragonflye) and [hybracter](https://github.com/gbouras13/hybracter).
+It is based on Ryan Wick's [tutorial](https://github.com/rrwick/Perfect-bacterial-genome-tutorial) and 
+reference to other tools such as [dragonflye](https://github.com/rpetit3/dragonflye) and 
+[hybracter](https://github.com/gbouras13/hybracter).
+Ouroboros is designed to assembly complete genome and is therefore not suitable for metagenome.
+  
+It is recommended to read Ryan Wick's [tutorial](https://github.com/rrwick/Perfect-bacterial-genome-tutorial) and 
+[blog](https://rrwick.github.io/) before using.
+  
 This tool is specifically build for Centrallab Lab of Taiwan CDC.
 
 # Installation
@@ -12,6 +19,14 @@ You will need to install the external dependencies separately with `conda`, whic
 git clone https://github.com/chen1i6c04/Ouroboros.git
 cd Ouroboros
 conda env create -f requirement.yaml
+conda activate ouroboros
+```
+
+Then you need download PLSDB for `plassembler`
+```commandline
+mkdir plassembler_db
+
+plassembler download -d plassembler_db
 ```
 
 # Quick usage
@@ -24,8 +39,6 @@ __If you have illumina read:__<br>
 ```bash
 ouroboros.py -i long_reads.fastq.gz -1 short_reads_1.fastq.gz -2 short_reads_2.fastq.gz -o output_dir
 ```
-
-
 
 # Pipeline
 <img src="misc/pipeline.png">

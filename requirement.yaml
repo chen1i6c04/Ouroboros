@@ -6,17 +6,17 @@ channels:
 dependencies:
   - python
   - pandas>=1.5.3
-  - biopython>=1.78
+  - biopython=1.78
   - loguru=0.5.3
   - flye=2.9.2
-  - medaka>=1.11.3
+  - medaka=1.11.3
   - rasusa=0.7.1
   - nanoq=0.10.0
   - kmc=3.2.1
   - polypolish=0.5.0
   - bwa-mem2=2.2.1
   - pypolca=0.2.1
-  - filtlong
-  - porechop
-  - dnaapler>=0.4.0
+  - filtlong=0.2.1
+  - porechop=0.2.4
+  - dnaapler=0.4.0
   - plassembler=1.5.0

@@ -153,7 +153,7 @@ def main():
                         help="Flye will use '--nano-hq' instead of --nano-raw")
     parser.add_argument('--contaminants',
                         help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.')
-    parser.add_argument('-v','--version', action='version', version=__version__)
+    parser.add_argument('-v', '--version', action='version', version=__version__)
     args = parser.parse_args()
 
     if (args.short_1 and not args.short_2) or (not args.short_1 and args.short_2):
