@@ -11,7 +11,7 @@ Ouroboros is designed to assembly complete genome and is therefore not suitable 
 It is recommended to read Ryan Wick's [tutorial](https://github.com/rrwick/Perfect-bacterial-genome-tutorial) and 
 [blog](https://rrwick.github.io/) before using.
   
-This tool is specifically build for Centrallab Lab of Taiwan CDC.
+This tool is specifically build for central laboratory of Taiwan CDC.
 
 # Installation
 You will need to install the external dependencies separately with `conda`, which can be found in `requirement.yaml`
@@ -41,7 +41,25 @@ ouroboros.py -i long_reads.fastq.gz -1 short_reads_1.fastq.gz -2 short_reads_2.f
 ```
 
 # Pipeline
-<img src="misc/pipeline.png">
+<img src="misc/pipeline.png" width="800">
+
+# Outputs
+| File Name           | Description                                                                 |
+|---------------------|-----------------------------------------------------------------------------|
+| 1_flye.fasta        | Raw assembly                                                                |
+| 2_medaka.fasta      | Reoriented and polished assembly by dnaapler and medaka                     |
+| 3_plassembler.fasta | Plasmid assembly by plassembler, this is final assembly if long-reads only. |
+| 4_polypolish.fasta  | Polished assembly by polypolish                                             |
+| 5_polca.fasta       | Polished assembly by pypolca, this is final assembly if add short-reads.    |
+| flye.log            |                                                                             |
+| flye_info.txt       | Extra information about contigs by flye                                     |
+| flye-unpolished.gfa | Final repeat graph by flye                                                  |
+| polypolish.report   |                                                                             |
+| polca.report        |                                                                             |
+| ouroboros.log       |                                                                             |
+| plassembler         | Plassembler outputs                                                         |
+
+
 
 # Citation
 If you use Ouroboros, please cite the core dependencies.
