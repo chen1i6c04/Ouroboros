@@ -5,7 +5,6 @@ channels:
   - defaults
 dependencies:
   - python
-  - pandas>=1.5.3
   - biopython=1.78
   - loguru=0.5.3
   - flye=2.9.2
