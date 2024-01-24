@@ -1,6 +1,6 @@
 import os
+import csv
 from tempfile import NamedTemporaryFile
-import pandas as pd
 from loguru import logger
 from .utils import syscall
 
@@ -40,11 +40,14 @@ def run_polypolish(assembly, short_1, short_2, output_dir, num_threads):
     return output
 
 
+@logger.catch
 def run_dnaapler(assembly, outdir, asm_info, threads):
-    df = pd.read_csv(asm_info, sep='\t')
-    s = df[df['circ.'] == 'N']['#seq_name']
-    with NamedTemporaryFile('w') as tmpfile:
-        tmpfile.write(s.to_csv(index=False, header=False))
+    with open(asm_info) as handle, NamedTemporaryFile('w') as tmpfile:
+        spamreader = csv.reader(handle, delimiter='\t')
+        next(spamreader)  # ignore header
+        for row in spamreader:
+            if row[3] == 'N':
+                tmpfile.write(row[0] + '\n')
         tmpfile.flush()
         cmd = ['dnaapler', 'all', '-i', assembly, '-o', outdir, '-t', str(threads), '--ignore', tmpfile.name]
         syscall(cmd)
@@ -61,11 +64,9 @@ def run_polca(assembly, short_1, short_2, output_dir, num_threads):
     syscall(cmd)
 
 
-def run_flye(reads, outdir, threads, meta, high_quality):
+def run_flye(reads, outdir, threads, high_quality):
     input_type = '--nano-hq' if high_quality else '--nano-raw'
     cmd = ['flye', input_type, reads, '-o', outdir, '-t', str(threads)]
-    if meta:
-        cmd += ['--meta']
     logger.info(f"Flye command: {' '.join(cmd)}")
     syscall(cmd)
     log = os.path.join(outdir, 'flye.log')
@@ -75,10 +76,8 @@ def run_flye(reads, outdir, threads, meta, high_quality):
     return assembly, assembly_info, assembly_graph, log
 
 
-def run_medaka(assembly, reads, outdir, model, options, threads):
+def run_medaka(assembly, reads, outdir, model, threads):
     cmd = f"medaka_consensus -i {reads} -d {assembly} -o {outdir} -m {model} -t {threads}"
-    if options:
-        cmd += f" {options}"
     logger.info("Medaka command: " + cmd)
     syscall(cmd)
     return os.path.join(outdir, 'consensus.fasta')

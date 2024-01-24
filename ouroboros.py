@@ -188,33 +188,29 @@ def main():
         reads = cleaned_reads
     fastq_stats = fastq_scan(reads)
 
-    if not args.meta:
-        total_bases = fastq_stats['bases']
-        if args.gsize:
-            gsize = parse_genome_size(args.gsize)
-            logger.info(f"Using genome size was {gsize}bp.")
+    total_bases = fastq_stats['bases']
+    if args.gsize:
+        gsize = parse_genome_size(args.gsize)
+        logger.info(f"Using genome size was {gsize}bp.")
+    else:
+        gsize = estimate_genome_size(reads, args.num_threads)
+        logger.info(f"Estimated genome size was {gsize}bp.")
+    origin_depth = total_bases / gsize
+    logger.info(f'Estimated sequencing depth: {origin_depth:.0f} x')
+    if args.depth:
+        if origin_depth > args.depth:
+            logger.info(f"Subsampling reads from {origin_depth:.0f}x to {args.depth}x.")
+            sub_reads = os.path.join(args.outdir, 'READS.sub.fastq')
+            subsampling(reads, sub_reads, gsize, args.depth)
         else:
-            gsize = estimate_genome_size(reads, args.num_threads)
-            logger.info(f"Estimated genome size was {gsize}bp.")
-        origin_depth = total_bases / gsize
-        logger.info(f'Estimated sequencing depth: {origin_depth:.0f} x')
-        if args.depth:
-            if origin_depth > args.depth:
-                logger.info(f"Subsampling reads from {origin_depth:.0f}x to {args.depth}x.")
-                sub_reads = os.path.join(args.outdir, 'READS.sub.fastq')
-                subsampling(reads, sub_reads, gsize, args.depth)
-            else:
-                logger.info("No read depth reduction requested or necessary.")
-                sub_reads = reads
-        else:
+            logger.info("No read depth reduction requested or necessary.")
             sub_reads = reads
     else:
-        logger.info("Flag '--meta' was be set, won't subsampling reads.")
         sub_reads = reads
 
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
-    flye_asm, flye_info, flye_graph, flye_log = run_flye(sub_reads, flye_dir, args.num_threads, args.meta, args.hq)
+    flye_asm, flye_info, flye_graph, flye_log = run_flye(sub_reads, flye_dir, args.num_threads, args.hq)
 
     shutil.copyfile(
         flye_asm,
@@ -243,7 +239,6 @@ def main():
         reads=reads,
         outdir=medaka_dir,
         model=args.medaka_model,
-        options=args.medaka_opt,
         threads=args.num_threads
     )
     shutil.copyfile(medaka_asm, os.path.join(args.outdir, '2_medaka.fasta'))
