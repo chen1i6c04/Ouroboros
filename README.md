@@ -2,7 +2,7 @@
 <p align="center"><a href="https://www.flaticon.com/free-icons/snake" title="snake icons">Snake icons created by Freepik - Flaticon</a></p>
 
 # Introduction
-Ouroboros is a simple assembly pipeline for bacterial isolate genome with nanopore sequence.
+Ouroboros is a hybrid assembly pipeline for bacterial genome with nanopore sequence and illumina sequence.
 It is based on Ryan Wick's [tutorial](https://github.com/rrwick/Perfect-bacterial-genome-tutorial) and 
 reference to other tools such as [dragonflye](https://github.com/rpetit3/dragonflye) and 
 [hybracter](https://github.com/gbouras13/hybracter).
@@ -22,20 +22,7 @@ conda env create -f requirement.yaml
 conda activate ouroboros
 ```
 
-Then you need download PLSDB for `plassembler`
-```commandline
-mkdir plassembler_db
-
-plassembler download -d plassembler_db
-```
-
 # Quick usage
-__Long read only assembly:__<br>
-```bash
-ouroboros.py -i long_reads.fastq.gz -o output_dir
-```
-
-__If you have illumina read:__<br>
 ```bash
 ouroboros.py -i long_reads.fastq.gz -1 short_reads_1.fastq.gz -2 short_reads_2.fastq.gz -o output_dir
 ```
@@ -44,20 +31,21 @@ ouroboros.py -i long_reads.fastq.gz -1 short_reads_1.fastq.gz -2 short_reads_2.f
 <img src="misc/pipeline.png" width="800">
 
 # Outputs
-| File Name           | Description                                                                 |
-|---------------------|-----------------------------------------------------------------------------|
-| 1_flye.fasta        | Raw assembly                                                                |
-| 2_medaka.fasta      | Reoriented and polished assembly by dnaapler and medaka                     |
-| 3_plassembler.fasta | Plasmid assembly by plassembler, this is final assembly if long-reads only. |
-| 4_polypolish.fasta  | Polished assembly by polypolish                                             |
-| 5_polca.fasta       | Polished assembly by pypolca, this is final assembly if add short-reads.    |
-| flye.log            |                                                                             |
-| flye_info.txt       | Extra information about contigs by flye                                     |
-| flye-unpolished.gfa | Final repeat graph by flye                                                  |
-| polypolish.report   |                                                                             |
-| polca.report        |                                                                             |
-| ouroboros.log       |                                                                             |
-| plassembler         | Plassembler outputs                                                         |
+| File Name           | Description                             |
+|---------------------|-----------------------------------------|
+| 1_flye.fasta        | Reoriented raw assembly by dnaapler     |
+| 2_medaka.fasta      | Polished assembly by medaka             |
+| 3_plassembler.fasta | Plasmid assembly by plassembler         |
+| 4_polypolish.fasta  | Polished assembly by polypolish         |
+| 5_polca.fasta       | Polished assembly by pypolca.           |
+| assembly.fasta      | The final assembly you should use       |
+| flye.log            |                                         |
+| flye_info.txt       | Extra information about contigs by flye |
+| flye-unpolished.gfa | Final repeat graph by flye              |
+| polypolish.report   |                                         |
+| polca.report        |                                         |
+| ouroboros.log       |                                         |
+| plassembler         | Plassembler outputs                     |
 
 
 

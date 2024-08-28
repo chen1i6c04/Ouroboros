@@ -1,7 +1,9 @@
 import os
+import re
 import sys
 import gzip
 import json
+import shutil
 import subprocess
 from tempfile import TemporaryDirectory
 from Bio import SeqIO
@@ -41,31 +43,41 @@ def validate_fastq(file):
         :param file: fastq file
     :return: zipped - Boolean whether the input fastq is gzipped.
     """
-
+    def is_gzip(f):
+        with open(f, 'rb') as f:
+            signature = f.read(2)
+        return signature == b'\x1f\x8b'
     # to get extension
-    filename, file_extension = os.path.splitext(file)
-    if file_extension == ".gz":
-        # if gzipped
-        with gzip.open(file, "rt") as handle:
-            fastq = SeqIO.parse(handle, "fastq")
-            if any(fastq):
-                logger.info(f"FASTQ {file} checked")
-            else:
-                logger.error(f"Input file {file} is not in the FASTQ format.")
-                sys.exit('Abort')
-    else:
-        with open(file, "r") as handle:
-            fastq = SeqIO.parse(handle, "fastq")
-            if any(fastq):
-                logger.info(f"FASTQ {file} checked")
-            else:
-                logger.error(f"Input file {file} is not in the FASTQ format.")
-                sys.exit('Abort')
+    open_function = gzip.open if is_gzip(file) else open
+    with open_function(file, 'rt') as handle:
+        if any(SeqIO.parse(handle, 'fastq')):
+            logger.info(f"FASTQ {file} checked")
+        else:
+            logger.error(f"Input file {file} is not in the FASTQ format.")
+            sys.exit('Abort')
 
 
-def fastq_scan(file):
-    p = syscall(f"nanoq -s -f -j -i {file}", stdout=True)
+def fastq_scan(fastq):
+    p = syscall(f"nanoq -s -f -j -i {fastq}", stdout=True)
     return json.loads(p.stdout)
+
+
+def fasta_scan(fasta):
+    records = list(SeqIO.parse(fasta, 'fasta'))
+    summary = dict()
+    summary['num_seqs'] = len(records)
+    summary['bases'] = sum(len(rec) for rec in records)
+    return summary
+
+
+def parse_genome_size(pattern):
+    unit_map = {'K': 1e3, 'M': 1e6, 'G': 1e9}
+    result = re.fullmatch(r'^([\d.]+)([KMG])', pattern)
+    if result is None:
+        return
+    else:
+        value, unit = result.groups()
+        return int(float(value) * unit_map[unit])
 
 
 def estimate_genome_size(fastq_file, num_threads):
@@ -75,7 +87,9 @@ def estimate_genome_size(fastq_file, num_threads):
             f"grep 'No. of unique counted k-mers' | "
             f"awk '{{print $NF}}'", stdout=True
         ).stdout
-    return int(output.strip())
+    genome_size = int(output.strip())
+    logger.info(f"Estimated genome size was {genome_size}bp.")
+    return genome_size
 
 
 def exclude_target_from_single_end(input_reads, output_reads, target, threads):
@@ -88,8 +102,24 @@ def exclude_target_from_single_end(input_reads, output_reads, target, threads):
 
 
 def exclude_target_from_paired_end(paired_1, paired_2, output_1, output_2, target, threads):
-    cmd = f"minimap2 -t {threads} -ax sr {target} {paired_1} {paired_2} | " \
-          f"samtools sort -@ {threads} -n -O BAM - | " \
-          f"samtools view -@ {threads} -f 12 -O BAM - | " \
-          f"samtools fastq -@ {threads} -1 {output_1} -2 {output_2} -0 /dev/null -s /dev/null -n -"
+    cmd = (
+        f"minimap2 -t {threads} -ax sr {target} {paired_1} {paired_2} | "
+        f"samtools sort -@ {threads} -n -O BAM - | "
+        f"samtools view -@ {threads} -f 12 -O BAM - | "
+        f"samtools fastq -@ {threads} -1 {output_1} -2 {output_2} -0 /dev/null -s /dev/null -n -"
+    )
     syscall(cmd)
+
+
+def process_flye_output(flye_output, outdir):
+    src = os.path.join(flye_output, 'flye.log')
+    dst = os.path.join(outdir, 'flye.log')
+    shutil.copy(src, dst)
+
+    src = os.path.join(flye_output, 'assembly_info.txt')
+    dst = os.path.join(outdir, 'flye_info.txt')
+    shutil.copy(src, dst)
+
+    src = os.path.join(flye_output, 'assembly_graph.gfa')
+    dst = os.path.join(outdir, 'flye-unpolished.gfa')
+    shutil.copy(src, dst)

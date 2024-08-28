@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import shutil
 import argparse
@@ -9,11 +8,16 @@ from modules.utils import (syscall,
                            estimate_genome_size,
                            exclude_target_from_single_end,
                            validate_fastq,
-                           fastq_scan)
-from modules.run import run_polypolish, run_dnaapler, run_polca, run_flye, run_medaka, run_plassembler
+                           fastq_scan,
+                           parse_genome_size,
+                           process_flye_output)
+from modules.filter import length_filter, quality_filter
+from modules.trim import trim_short_reads, trim_long_reads
+from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run_medaka
+from modules.plassembler import run_plassembler
 
 __location__ = os.path.dirname(os.path.abspath(__file__))
-__version__ = 'v0.0.1'
+__version__ = 'v0.0.2'
 
 
 def check_dependency():
@@ -52,130 +56,95 @@ def print_used_values(args):
     logger.info("You ran: " + ' '.join(command))
 
 
-def initialize(args):
-    os.makedirs(args.outdir, exist_ok=True)
-    logfile = os.path.join(args.outdir, 'ouroboros.log')
-    fmt = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
-    logger.add(logfile, format=fmt, level='INFO')
-    logger.add(sys.stderr, format=fmt, level='ERROR')
-    command = ' '.join(sys.argv)
-    logger.info("You ran: " + command)
-    check_dependency()
+def begin(outdir):
+    os.makedirs(outdir, exist_ok=True)
+    log_format = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
+    logfile = os.path.join(outdir, 'ouroboros.log')
+    logger.add(logfile, format=log_format, level='INFO')
+    logger.add(sys.stderr, format=log_format, level='ERROR')
+    logger.info("You are using Ouroboros version 0.0.2")
+    logger.info("You ran: " + ' '.join(sys.argv))
 
 
-def parse_genome_size(pattern):
-    unit_map = {'K': 1e3, 'M': 1e6, 'G': 1e9}
-    result = re.fullmatch(r'^([\d.]+)([KMG])', pattern)
-    if result is None:
-        logger.error(f"Couldn't parse {pattern}")
-        sys.exit("Aborted")
-    else:
-        value, unit = result.groups()
-        return int(float(value) * unit_map[unit])
+def short_reads_polish(assembly, short_1, short_2, outdir, depth, threads):
+    polypolish_asm = run_polypolish(assembly, short_1, short_2, outdir, threads)
 
+    polca_dir = os.path.join(outdir, 'pypolca')
+    polca_asm = os.path.join(polca_dir, 'pypolca_corrected.fasta')
+    run_pypolca(polypolish_asm, short_1, short_2, polca_dir, depth, threads)
 
-def long_reads_trimming(input_file, output_file, threads):
-    logger.info("Long reads trimming.")
-    cmd = f"porechop -i {input_file} -o {output_file} --format fastq.gz -t {threads}"
-    syscall(cmd)
-
-
-def long_reads_filter(input_file, output_dir, threads, min_length=1, min_quality=1, keep_percent=90):
-    logger.info(f"Filter out reads length less than {min_length:,}bp and average quality score less {min_quality}")
-    first_filter = os.path.join(output_dir, 'READS_1st_filt.fastq.gz')
-    cmd = f'nanoq -i {input_file} -l {min_length} -q {min_quality} | pigz -6 -p {threads} > {first_filter}'
-    syscall(cmd)
-    logger.info(f"Keep only {keep_percent} percentage of the best reads")
-    second_filter = os.path.join(output_dir, 'READS_2nd_filt.fastq.gz')
-    cmd = f'filtlong --keep_percent {keep_percent} {first_filter} | pigz -6 -p {threads} > {second_filter}'
-    syscall(cmd)
-    return second_filter
-
-
-def short_reads_trimming(input_1, input_2, output_1, output_2, threads):
-    logger.info("Trimming short reads.")
-    cmd = [
-        'fastp', '-i', input_1, '-I', input_2, '-o', output_1, '-O', output_2,
-        '--thread', str(threads), '--detect_adapter_for_pe', '-j', '/dev/null', '-h', '/dev/null', '-t', '1',
-    ]
-    syscall(cmd)
-
-
-def short_reads_polish(assembly, short_1, short_2, outdir, threads):
-    polca_dir = os.path.join(outdir, 'polca')
-    polypolish_output = run_polypolish(assembly, short_1, short_2, outdir, threads)
-    run_polca(polypolish_output, short_1, short_2, polca_dir, threads)
-    shutil.copyfile(
-        os.path.join(polca_dir, 'polca_corrected.fasta'),
-        os.path.join(outdir, '5_polca.fasta')
-    )
-    shutil.copy(
-        os.path.join(polca_dir, 'polca.report'),
-        outdir
-    )
+    syscall(f"seqkit sort -r -l -o {os.path.join(outdir, '5_pypolca.fasta')} {polca_asm}")
+    shutil.copy(os.path.join(polca_dir, 'pypolca.report'), outdir)
     shutil.rmtree(polca_dir)
 
 
-def subsampling(infile, outfile, gsize, depth):
-    bases = gsize * depth
-    cmd = ['rasusa', '-b', str(bases), '-i', infile, '-o', outfile]
-    syscall(cmd)
+@logger.catch
+def check_plassembler_db_installation(db_dir):
+    syscall(f"plassembler download -f -d {db_dir}")
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="Ouroboros")
-    parser.add_argument('-i', '--infile',
-                        required=True,
-                        help='Input Nanopore FASTQ')
-    parser.add_argument('-1', '--short_1', default='',
-                        help='Read 1 FASTQ to use for polishing')
-    parser.add_argument('-2', '--short_2', default='',
-                        help='Read 2 FASTQ to use for polishing')
-    parser.add_argument('-o', '--outdir',
-                        required=True,
-                        help='Specify directory in which output has to be created.')
-    parser.add_argument('-t', '--num-threads', default=1, type=int,
-                        help='Set the allowed number of threads to be used by the script (default: 1)')
-    parser.add_argument('-l', '--min-length', metavar='', default=1, type=int)
-    parser.add_argument('-q', '--min-quality', metavar='', default=1, type=int)
-    parser.add_argument('--nofilter', action='store_true', default=False,
-                        help='Disable long reads length filtering')
-    parser.add_argument('--notrim', action='store_true', default=False,
-                        help='Disable long reads trimming.')
-    parser.add_argument('-x', '--depth',
-                        default=100, type=int,
-                        help='Sub-sample reads to this depth. Disable with --depth 0 (default: 100)')
-    parser.add_argument('-g', '--gsize', default=None, metavar='',
-                        help='Estimated genome size eg. 3.2M <blank=AUTO> (default: "")')
-    parser.add_argument('--medaka_model', default='r1041_e82_400bps_sup_v4.3.0',
-                        help='The model to be used by Medaka (default: r1041_e82_400bps_sup_v4.3.0)')
-    parser.add_argument('--hq', action='store_true',
-                        help="Flye will use '--nano-hq' instead of --nano-raw")
-    parser.add_argument('--contaminants',
-                        help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.')
-    parser.add_argument('-v', '--version', action='version', version=__version__)
+    parser = argparse.ArgumentParser(
+        prog="ouroboros.py",
+        description='Ouroboros is a pipeline of hybrid assembly for bacteria.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    required = parser.add_argument_group("Required")
+    required.add_argument('-i', '--infile', required=True, help='Input Nanopore FASTQ')
+    required.add_argument('-1', '--short_1', required=True, help='Read 1 FASTQ to use for polishing')
+    required.add_argument('-2', '--short_2', required=True, help='Read 2 FASTQ to use for polishing')
+    required.add_argument('-o', '--outdir', required=True, help='Specify directory in which output has to be created.')
+
+    optional = parser.add_argument_group("Optional")
+    optional.add_argument(
+        '-t', '--num-threads', default=1, type=int, help='Set the allowed number of threads to be used by the script'
+    )
+    optional.add_argument('-l', '--min-length', metavar='', default=1, type=int, help='Minimum length')
+    optional.add_argument('-q', '--min-quality', metavar='', default=1, type=int, help='Minimum mean quality')
+    optional.add_argument(
+        '-p', '--keep-percent', metavar='', default=90, type=int, help='keep only this percentage of the best reads'
+    )
+    optional.add_argument('--nofilter', action='store_true', default=False, help='Disable long reads length filtering')
+    optional.add_argument('--notrim', action='store_true', default=False, help='Disable long reads trimming.')
+    optional.add_argument(
+        '-x', '--depth', default=100, type=int, help='Sub-sample reads to this depth. Disable with --depth 0'
+    )
+    optional.add_argument('-g', '--gsize', default=None, metavar='', help='Estimated genome size eg. 3.2M <blank=AUTO>')
+    optional.add_argument(
+        '--medaka_model', default='r1041_e82_400bps_sup_v4.3.0', help='The model to be used by Medaka'
+    )
+    optional.add_argument('--hq', action='store_true', help="Flye will use '--nano-hq' instead of --nano-raw")
+    optional.add_argument(
+        '--contaminants', help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.'
+    )
+    optional.add_argument('-v', '--version', action='version', version=__version__)
     args = parser.parse_args()
 
     if (args.short_1 and not args.short_2) or (not args.short_1 and args.short_2):
         parser.error("-1 and -2 must be used together")
 
+    begin(args.outdir)
+    check_dependency()
+    plassembler_db = os.path.join(__location__, 'plassembler_db')
+    check_plassembler_db_installation(plassembler_db)
     validate_medaka_model(args.medaka_model)
-
-    initialize(args)
-
     validate_fastq(args.infile)
-    if args.short_1 and args.short_2:
-        validate_fastq(args.short_1)
-        validate_fastq(args.short_2)
+    validate_fastq(args.short_1)
+    validate_fastq(args.short_2)
 
     reads = args.infile
     if not args.notrim:
+        logger.info("Remove long reads adapter and barcode sequence")
         trimmed_reads = os.path.join(args.outdir, 'READS_trim.fastq.gz')
-        long_reads_trimming(reads, trimmed_reads, args.num_threads)
+        trim_long_reads(reads, trimmed_reads, args.num_threads)
         reads = trimmed_reads
     if not args.nofilter:
-        filtered_reads = long_reads_filter(reads, args.outdir, args.num_threads, args.min_length, args.min_quality)
-        reads = filtered_reads
+        first_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
+        quality_filter(
+            reads, first_filter, keep_percent=args.keep_percent, min_quality=args.min_quality, threads=args.num_threads
+        )
+        reads = first_filter
+
     if args.contaminants:
         logger.info("Clean contaminants.")
         cleaned_reads = os.path.join(args.outdir, 'READS_clean.fastq.gz')
@@ -186,86 +155,83 @@ def main():
             threads=args.num_threads
         )
         reads = cleaned_reads
-    fastq_stats = fastq_scan(reads)
 
+    fastq_stats = fastq_scan(reads)
     total_bases = fastq_stats['bases']
+
     if args.gsize:
         gsize = parse_genome_size(args.gsize)
-        logger.info(f"Using genome size was {gsize}bp.")
+        if gsize:
+            logger.info(f"Using genome size was {gsize}bp.")
+        else:
+            logger.warning(f"Couldn't parse string {args.gsize}, will auto estimate.")
+            gsize = estimate_genome_size(reads, args.num_threads)
     else:
         gsize = estimate_genome_size(reads, args.num_threads)
-        logger.info(f"Estimated genome size was {gsize}bp.")
+
     origin_depth = total_bases / gsize
-    logger.info(f'Estimated sequencing depth: {origin_depth:.0f} x')
+    logger.info(f'Estimated long sequencing depth: {origin_depth:.0f} x')
     if args.depth:
         if origin_depth > args.depth:
             logger.info(f"Subsampling reads from {origin_depth:.0f}x to {args.depth}x.")
             sub_reads = os.path.join(args.outdir, 'READS.sub.fastq')
-            subsampling(reads, sub_reads, gsize, args.depth)
+            syscall(f"rasusa reads -b {gsize * args.depth} {reads} -o {sub_reads}")
         else:
             logger.info("No read depth reduction requested or necessary.")
             sub_reads = reads
     else:
         sub_reads = reads
 
+    second_filter = length_filter(
+        sub_reads, args.outdir, args.min_length, args.num_threads
+    )
+
+    logger.info('Trimming short reads.')
+    trimmed_one = os.path.join(args.outdir, 'READS_1.fastq.gz')
+    trimmed_two = os.path.join(args.outdir, 'READS_2.fastq.gz')
+    trim_short_reads(args.short_1, args.short_2, trimmed_one, trimmed_two, args.num_threads)
+    total_bases = fastq_scan(trimmed_one)['bases'] + fastq_scan(trimmed_one)['bases']
+
+    origin_depth = total_bases / gsize
+    logger.info(f'Estimated short sequencing depth: {origin_depth:.0f} x')
+
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
-    flye_asm, flye_info, flye_graph, flye_log = run_flye(sub_reads, flye_dir, args.num_threads, args.hq)
+    run_flye(second_filter, flye_dir, args.num_threads, args.hq)
+    process_flye_output(flye_dir, args.outdir)
 
-    shutil.copyfile(
-        flye_asm,
-        os.path.join(args.outdir, '1_flye.fasta')
-    )
-    shutil.copyfile(
-        flye_info,
-        os.path.join(args.outdir, 'flye_info.txt')
-    )
-    shutil.copyfile(
-        flye_graph,
-        os.path.join(args.outdir, 'flye-unpolished.gfa')
-    )
-    shutil.copyfile(
-        flye_log,
-        os.path.join(args.outdir, 'flye.log')
-    )
     logger.info('Reorients complete circular sequence.')
     dnaapler_dir = os.path.join(args.outdir, 'dnaapler')
-    reoriented_asm = run_dnaapler(flye_asm, dnaapler_dir, flye_info, args.num_threads)
+    dnaapler_asm = os.path.join(dnaapler_dir, 'dnaapler_reoriented.fasta')
+    run_dnaapler(flye_output=flye_dir, outdir=dnaapler_dir, threads=args.num_threads)
+    syscall(f"seqkit sort -l -r {dnaapler_asm} -o {os.path.join(args.outdir, '1_flye.fasta')}")
 
     logger.info("Polishing with medaka.")
     medaka_dir = os.path.join(args.outdir, 'medaka')
-    medaka_asm = run_medaka(
-        assembly=reoriented_asm,
-        reads=reads,
-        outdir=medaka_dir,
-        model=args.medaka_model,
+    medaka_asm = os.path.join(args.outdir, '2_medaka.fasta')
+    run_medaka(
+        assembly=dnaapler_asm, reads=reads, outdir=medaka_dir, model=args.medaka_model, threads=args.num_threads
+    )
+    syscall(f"seqkit sort -l -r {os.path.join(medaka_dir, 'consensus.fasta')} -o {medaka_asm}")
+
+    logger.info("Plasmid assembly.")
+    plassembler_dir = os.path.join(args.outdir, 'plassembler')
+    chromosome, plasmids = run_plassembler(
+        reads=sub_reads,
+        assembly=medaka_asm, assembly_info=os.path.join(args.outdir, 'flye_info.txt'),
+        outdir=plassembler_dir, database=plassembler_db, short_one=trimmed_one, short_two=trimmed_two,
         threads=args.num_threads
     )
-    shutil.copyfile(medaka_asm, os.path.join(args.outdir, '2_medaka.fasta'))
+    plassembler_asm = os.path.join(args.outdir, '3_plassembler.fasta')
+    syscall(f"cat {chromosome} {plasmids} > {plassembler_asm}")
 
-    if args.short_1 and args.short_2:
-        trim_1, trim_2 = os.path.join(args.outdir, 'READS_1.trim.fastq'), os.path.join(args.outdir, 'READS_2.trim.fastq')
-        short_reads_trimming(args.short_1, args.short_2, trim_1, trim_2, args.num_threads)
 
-        logger.info("Plasmid assembly.")
-        plassembler_dir = os.path.join(args.outdir, 'plassembler')
-        chromosome, plasmids = run_plassembler(
-            long=sub_reads, short_1=trim_1, short_2=trim_2, outdir=plassembler_dir, flye_asm=medaka_asm,
-            flye_info=flye_info, threads=args.num_threads, database=os.path.join(__location__, 'plassembler_db')
-        )
-        plassembler_asm = os.path.join(args.outdir, '3_plassembler.fasta')
-        syscall(f"cat {chromosome} {plasmids} > {plassembler_asm}")
-        logger.info("Polishing with short reads")
-        short_reads_polish(plassembler_asm, trim_1, trim_2, args.outdir, args.num_threads)
-    else:
-        logger.info("Plasmid assembly.")
-        plassembler_dir = os.path.join(args.outdir, 'plassembler')
-        chromosome, plasmids = run_plassembler(
-            long=sub_reads, outdir=plassembler_dir, flye_asm=medaka_asm, flye_info=flye_info, threads=args.num_threads,
-            database=os.path.join(__location__, 'plassembler_db')
-        )
-        plassembler_asm = os.path.join(args.outdir, '3_plassembler.fasta')
-        syscall(f"cat {chromosome} {plasmids} > {plassembler_asm}")
+
+    short_reads_polish(
+        plassembler_asm, trimmed_one, trimmed_two, args.outdir, origin_depth, args.num_threads
+    )
+    syscall(f"seqkit sort -l -r  -o {os.path.join(args.outdir, 'assembly.fasta')} "
+            f"{os.path.join(args.outdir, '5_pypolca.fasta')}")
 
     for d in (flye_dir, medaka_dir, dnaapler_dir):
         shutil.rmtree(d)
