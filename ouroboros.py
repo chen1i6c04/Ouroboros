@@ -17,7 +17,7 @@ from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run
 from modules.plassembler import run_plassembler
 
 __location__ = os.path.dirname(os.path.abspath(__file__))
-__version__ = 'v0.0.2'
+__version__ = 'v1.0.0'
 
 
 def check_dependency():
