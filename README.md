@@ -11,7 +11,7 @@ Ouroboros is designed to assembly complete genome and is therefore not suitable 
 It is recommended to read Ryan Wick's [tutorial](https://github.com/rrwick/Perfect-bacterial-genome-tutorial) and 
 [blog](https://rrwick.github.io/) before using.
   
-This tool is specifically build for central laboratory of Taiwan CDC.
+This tool is specifically build for central laboratory of [Taiwan CDC](https://www.cdc.gov.tw/).
 
 # Installation
 You will need to install the external dependencies separately with `conda`, which can be found in `requirement.yaml`
