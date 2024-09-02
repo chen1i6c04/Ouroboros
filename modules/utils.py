@@ -1,9 +1,7 @@
-import os
 import re
 import sys
 import gzip
 import json
-import shutil
 import subprocess
 from tempfile import TemporaryDirectory
 from Bio import SeqIO
@@ -62,14 +60,6 @@ def fastq_scan(fastq):
     return json.loads(p.stdout)
 
 
-def fasta_scan(fasta):
-    records = list(SeqIO.parse(fasta, 'fasta'))
-    summary = dict()
-    summary['num_seqs'] = len(records)
-    summary['bases'] = sum(len(rec) for rec in records)
-    return summary
-
-
 def parse_genome_size(pattern):
     unit_map = {'K': 1e3, 'M': 1e6, 'G': 1e9}
     result = re.fullmatch(r'^([\d.]+)([KMG])', pattern)
@@ -109,17 +99,3 @@ def exclude_target_from_paired_end(paired_1, paired_2, output_1, output_2, targe
         f"samtools fastq -@ {threads} -1 {output_1} -2 {output_2} -0 /dev/null -s /dev/null -n -"
     )
     syscall(cmd)
-
-
-def process_flye_output(flye_output, outdir):
-    src = os.path.join(flye_output, 'flye.log')
-    dst = os.path.join(outdir, 'flye.log')
-    shutil.copy(src, dst)
-
-    src = os.path.join(flye_output, 'assembly_info.txt')
-    dst = os.path.join(outdir, 'flye_info.txt')
-    shutil.copy(src, dst)
-
-    src = os.path.join(flye_output, 'assembly_graph.gfa')
-    dst = os.path.join(outdir, 'flye-unpolished.gfa')
-    shutil.copy(src, dst)

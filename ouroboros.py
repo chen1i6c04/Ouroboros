@@ -9,8 +9,7 @@ from modules.utils import (syscall,
                            exclude_target_from_single_end,
                            validate_fastq,
                            fastq_scan,
-                           parse_genome_size,
-                           process_flye_output)
+                           parse_genome_size)
 from modules.filter import length_filter, quality_filter
 from modules.trim import trim_short_reads, trim_long_reads
 from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run_medaka
@@ -62,7 +61,7 @@ def begin(outdir):
     logfile = os.path.join(outdir, 'ouroboros.log')
     logger.add(logfile, format=log_format, level='INFO')
     logger.add(sys.stderr, format=log_format, level='ERROR')
-    logger.info("You are using Ouroboros version 0.0.2")
+    logger.info(f"You are using Ouroboros version {__version__}")
     logger.info("You ran: " + ' '.join(sys.argv))
 
 
@@ -198,7 +197,9 @@ def main():
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
     run_flye(second_filter, flye_dir, args.num_threads, args.hq)
-    process_flye_output(flye_dir, args.outdir)
+    shutil.copyfile(os.path.join(flye_dir, 'flye.log'), os.path.join(args.outdir, 'flye.log'))
+    shutil.copyfile(os.path.join(flye_dir, 'assembly_info.txt'), os.path.join(args.outdir, 'flye_info.txt'))
+    shutil.copyfile(os.path.join(flye_dir, 'assembly_graph.gfa'), os.path.join(args.outdir, 'flye-unpolished.gfa'))
 
     logger.info('Reorients complete circular sequence.')
     dnaapler_dir = os.path.join(args.outdir, 'dnaapler')

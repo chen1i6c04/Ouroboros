@@ -2,7 +2,7 @@ import os
 import csv
 from tempfile import NamedTemporaryFile
 from loguru import logger
-from .utils import syscall, fasta_scan, fastq_scan
+from .utils import syscall
 
 
 def run_bwa_mem2(assembly, fastq, output, num_threads):
