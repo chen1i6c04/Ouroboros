@@ -31,21 +31,21 @@ ouroboros.py -i long_reads.fastq.gz -1 short_reads_1.fastq.gz -2 short_reads_2.f
 <img src="misc/pipeline.png" width="800">
 
 # Outputs
-| File Name           | Description                             |
-|---------------------|-----------------------------------------|
-| 1_flye.fasta        | Reoriented raw assembly by dnaapler     |
-| 2_medaka.fasta      | Polished assembly by medaka             |
-| 3_plassembler.fasta | Plasmid assembly by plassembler         |
-| 4_polypolish.fasta  | Polished assembly by polypolish         |
-| 5_polca.fasta       | Polished assembly by pypolca.           |
-| assembly.fasta      | The final assembly you should use       |
-| flye.log            |                                         |
-| flye_info.txt       | Extra information about contigs by flye |
-| flye-unpolished.gfa | Final repeat graph by flye              |
-| polypolish.report   |                                         |
-| polca.report        |                                         |
-| ouroboros.log       |                                         |
-| plassembler         | Plassembler outputs                     |
+| File Name           | Description                                                          |
+|---------------------|----------------------------------------------------------------------|
+| 1_flye.fasta        | Genome assembly from flye and reoriented by dnaapler                 |
+| 2_medaka.fasta      | Polished step 1 assembly by medaka                                   |
+| 3_plassembler.fasta | Chromosome from step 2 assembly and plasmid assembled by plassembler |
+| 4_polypolish.fasta  | Polished step 3 assembly by polypolish                               |
+| 5_polca.fasta       | Polished step 4 assembly by pypolca                                  |
+| assembly.fasta      | The final assembly you should use                                    |
+| flye.log            | Log file of flye                                                     |
+| flye_info.txt       | Extra information about contigs by flye                              |
+| flye-unpolished.gfa | Final repeat graph by flye                                           |
+| polypolish.report   | Extra information of polypolish                                      |
+| pypolca.report      | Extra information of pypolca                                         |
+| ouroboros.log       | Log file of ouroboros                                                |
+| plassembler         | Plassembler outputs                                                  |
 
 
 

@@ -2,7 +2,7 @@ from .utils import syscall
 
 
 def trim_long_reads(infile, outfile, threads):
-    cmd = f"porechop -i {infile} -o {outfile} --check_reads 1000 --format fastq.gz -t {threads}"
+    cmd = f"porechop -i {infile} -o {outfile} --check_reads 1000 --discard_middle --format fastq.gz -t {threads}"
     syscall(cmd)
 
 

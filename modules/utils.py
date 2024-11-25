@@ -1,7 +1,6 @@
 import re
 import sys
 import gzip
-import json
 import subprocess
 from tempfile import TemporaryDirectory
 from Bio import SeqIO
@@ -53,11 +52,6 @@ def validate_fastq(file):
         else:
             logger.error(f"Input file {file} is not in the FASTQ format.")
             sys.exit('Abort')
-
-
-def fastq_scan(fastq):
-    p = syscall(f"nanoq -s -f -j -i {fastq}", stdout=True)
-    return json.loads(p.stdout)
 
 
 def parse_genome_size(pattern):

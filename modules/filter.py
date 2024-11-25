@@ -9,7 +9,7 @@ def length_filter(infile, outdir, min_length=1, threads=1):
     if min_length == 1:
         outfile = infile
     else:
-        syscall(f'nanoq -i {infile} -l {min_length} | pigz -6 -p {threads} > {outfile}')
+        syscall(f'nanoq -i {infile} -f -l {min_length} | pigz -6 -p {threads} > {outfile}')
     return outfile
 
 
@@ -20,4 +20,3 @@ def quality_filter(infile, outfile, keep_percent=90, min_quality=1, threads=1):
     else:
         cmd = f'filtlong --keep_percent {keep_percent} {infile} | nanoq -q {min_quality} | pigz -6 -p {threads} > {outfile}'
     syscall(cmd)
-    return outfile

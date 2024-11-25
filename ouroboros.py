@@ -1,17 +1,16 @@
 import os
 import sys
+import json
 import shutil
 import argparse
 from loguru import logger
+
 from modules.utils import (syscall,
                            validate_medaka_model,
                            estimate_genome_size,
                            exclude_target_from_single_end,
                            validate_fastq,
-                           fastq_scan,
                            parse_genome_size)
-from modules.filter import length_filter, quality_filter
-from modules.trim import trim_short_reads, trim_long_reads
 from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run_medaka
 from modules.plassembler import run_plassembler
 
@@ -28,7 +27,7 @@ def check_dependency():
         'medaka': 'medaka --version',
         "KMC": "kmc | grep K-Mer",
         'polypolish': 'polypolish --version',
-        'bwa-mem2': 'bwa-mem2 version 2> /dev/null',
+        'bwa': 'bwa 2>&1 | grep Version | cut -d " " -f 2',
         'pypolca': 'pypolca -V',
         'dnaapler': 'dnaapler -V',
         'plassembler': 'plassembler -V',
@@ -65,12 +64,12 @@ def begin(outdir):
     logger.info("You ran: " + ' '.join(sys.argv))
 
 
-def short_reads_polish(assembly, short_1, short_2, outdir, depth, threads):
+def short_reads_polish(assembly, short_1, short_2, outdir, threads):
     polypolish_asm = run_polypolish(assembly, short_1, short_2, outdir, threads)
 
     polca_dir = os.path.join(outdir, 'pypolca')
     polca_asm = os.path.join(polca_dir, 'pypolca_corrected.fasta')
-    run_pypolca(polypolish_asm, short_1, short_2, polca_dir, depth, threads)
+    run_pypolca(polypolish_asm, short_1, short_2, polca_dir, threads)
 
     syscall(f"seqkit sort -r -l -o {os.path.join(outdir, '5_pypolca.fasta')} {polca_asm}")
     shutil.copy(os.path.join(polca_dir, 'pypolca.report'), outdir)
@@ -133,16 +132,10 @@ def main():
 
     reads = args.infile
     if not args.notrim:
-        logger.info("Remove long reads adapter and barcode sequence")
+        logger.info("Remove long reads adapters")
         trimmed_reads = os.path.join(args.outdir, 'READS_trim.fastq.gz')
-        trim_long_reads(reads, trimmed_reads, args.num_threads)
+        syscall(f"porechop -i {reads} -o {trimmed_reads} --check_reads 1000 --discard_middle --format fastq.gz -t {args.num_threads}")
         reads = trimmed_reads
-    if not args.nofilter:
-        first_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
-        quality_filter(
-            reads, first_filter, keep_percent=args.keep_percent, min_quality=args.min_quality, threads=args.num_threads
-        )
-        reads = first_filter
 
     if args.contaminants:
         logger.info("Clean contaminants.")
@@ -155,8 +148,12 @@ def main():
         )
         reads = cleaned_reads
 
-    fastq_stats = fastq_scan(reads)
-    total_bases = fastq_stats['bases']
+    if not args.nofilter:
+        first_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
+        logger.info(f"Keep only {args.keep_percent} percentage of the best reads")
+        syscall(f'filtlong --keep_percent {args.keep_percent} {reads} | pigz -6 -p {args.num_threads} > {first_filter}')
+        reads = first_filter
+    total_bases = json.loads(syscall(f"nanoq -s -f -j -i {reads}", stdout=True).stdout)['bases']
 
     if args.gsize:
         gsize = parse_genome_size(args.gsize)
@@ -169,7 +166,7 @@ def main():
         gsize = estimate_genome_size(reads, args.num_threads)
 
     origin_depth = total_bases / gsize
-    logger.info(f'Estimated long sequencing depth: {origin_depth:.0f} x')
+    logger.info(f'Estimated long sequencing depth: {origin_depth:.0f}x')
     if args.depth:
         if origin_depth > args.depth:
             logger.info(f"Subsampling reads from {origin_depth:.0f}x to {args.depth}x.")
@@ -181,18 +178,22 @@ def main():
     else:
         sub_reads = reads
 
-    second_filter = length_filter(
-        sub_reads, args.outdir, args.min_length, args.num_threads
-    )
+    logger.info(f"Filter out reads length less than {args.min_length:,}bp and average qscore less than {args.min_quality}")
+    second_filter = os.path.join(args.outdir, 'READS.len.fastq.gz')
+    syscall(f'nanoq -i {sub_reads} -f -l {args.min_length} -q {args.min_quality} | '
+            f'pigz -6 -p {args.num_threads} > {second_filter}')
 
     logger.info('Trimming short reads.')
     trimmed_one = os.path.join(args.outdir, 'READS_1.fastq.gz')
     trimmed_two = os.path.join(args.outdir, 'READS_2.fastq.gz')
-    trim_short_reads(args.short_1, args.short_2, trimmed_one, trimmed_two, args.num_threads)
-    total_bases = fastq_scan(trimmed_one)['bases'] + fastq_scan(trimmed_one)['bases']
+    fastp_report = os.path.join(args.outdir, 'fastp.json')
+    syscall(f"fastp -i {args.short_1} -I {args.short_2} -o {trimmed_one} -O {trimmed_two} -l 50 -t 1 -5 -3 "
+            f"-w {args.num_threads} --detect_adapter_for_pe -j {fastp_report} -h /dev/null")
+    with open(fastp_report) as handle:
+        total_bases = json.load(handle)['summary']['after_filtering']['total_bases']
 
     origin_depth = total_bases / gsize
-    logger.info(f'Estimated short sequencing depth: {origin_depth:.0f} x')
+    logger.info(f'Estimated short sequencing depth: {origin_depth:.0f}x')
 
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
@@ -211,7 +212,7 @@ def main():
     medaka_dir = os.path.join(args.outdir, 'medaka')
     medaka_asm = os.path.join(args.outdir, '2_medaka.fasta')
     run_medaka(
-        assembly=dnaapler_asm, reads=reads, outdir=medaka_dir, model=args.medaka_model, threads=args.num_threads
+        assembly=dnaapler_asm, reads=second_filter, outdir=medaka_dir, model=args.medaka_model, threads=args.num_threads
     )
     syscall(f"seqkit sort -l -r {os.path.join(medaka_dir, 'consensus.fasta')} -o {medaka_asm}")
 
@@ -229,7 +230,7 @@ def main():
 
 
     short_reads_polish(
-        plassembler_asm, trimmed_one, trimmed_two, args.outdir, origin_depth, args.num_threads
+        plassembler_asm, trimmed_one, trimmed_two, args.outdir, args.num_threads
     )
     syscall(f"seqkit sort -l -r  -o {os.path.join(args.outdir, 'assembly.fasta')} "
             f"{os.path.join(args.outdir, '5_pypolca.fasta')}")

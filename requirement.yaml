@@ -4,19 +4,24 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - pip
   - python
   - biopython=1.78
   - loguru=0.5.3
-  - flye=2.9.2
-  - medaka=1.11.3
+  - flye=2.9.4
   - rasusa=2.1.0
   - nanoq=0.10.0
   - kmc=3.2.1
   - polypolish=0.6.0
-  - bwa-mem2=2.2.1
+  - bwa=0.7.17
   - pypolca=0.3.0
   - filtlong=0.2.1
   - porechop=0.2.4
-  - dnaapler=0.4.0
+  - dnaapler=1.0.1
   - plassembler=1.6.0
   - fastp=0.23.4
+  - minimap2>=2.17
+  - htslib >=1.14
+  - pyabpoa
+  - pip:
+      - medaka=1.12.1

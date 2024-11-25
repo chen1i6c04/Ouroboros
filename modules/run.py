@@ -1,41 +1,39 @@
 import os
+import re
 import csv
 from tempfile import NamedTemporaryFile
 from loguru import logger
 from .utils import syscall
 
-
-def run_bwa_mem2(assembly, fastq, output, num_threads):
-    syscall(f"bwa-mem2 index {assembly}")
-    syscall(f"bwa-mem2 mem -t {num_threads} -a {assembly} {fastq} > {output}")
-    syscall(f"rm {assembly}.*")
+def paired_mapping(paired_1, paired_2, alignment_1, alignment_2, reference, num_threads):
+    syscall(f"bwa index {reference}")
+    syscall(f"bwa mem -t {num_threads} -a {reference} {paired_1} > {alignment_1}")
+    syscall(f"bwa mem -t {num_threads} -a {reference} {paired_2} > {alignment_2}")
+    syscall(f"rm {reference}.*")
 
 
 def run_polypolish(assembly, short_1, short_2, output_dir, num_threads):
-    align_1 = os.path.join(output_dir, 'alignments_1.sam')
-    align_2 = os.path.join(output_dir, 'alignments_2.sam')
+    alignments_1 = os.path.join(output_dir, 'alignments_1.sam')
+    alignments_2 = os.path.join(output_dir, 'alignments_2.sam')
     filtered_1 = os.path.join(output_dir, 'filtered_1.sam')
     filtered_2 = os.path.join(output_dir, 'filtered_2.sam')
     report = os.path.join(output_dir, 'polypolish.report')
     output = os.path.join(output_dir, '4_polypolish.fasta')
-    run_bwa_mem2(assembly, short_1, align_1, num_threads)
-    run_bwa_mem2(assembly, short_2, align_2, num_threads)
+    paired_mapping(short_1, short_2, alignments_1, alignments_2, assembly, num_threads)
 
-    handle = open(report, 'w')
-    p = syscall(
-        f'polypolish filter --in1 {align_1} --in2 {align_2} --out1 {filtered_1} --out2 {filtered_2}', stderr=True
-    )
-    handle.write(p.stderr)
-    p = syscall(
-        f"polypolish polish {assembly} {filtered_1} {filtered_2} | "
-        f"sed 's/polypolish//g' | "
-        f"seqkit sort -l -r -o {output}", stderr=True
-    )
-    handle.write(p.stderr)
-    handle.close()
-
-    syscall(f"sed -r 's/\x1b\[[0-9;]*m//g' -i {report}")
-    for f in (align_1, align_2, filtered_1, filtered_2):
+    with open(report, 'w') as handle:
+        p = syscall(
+            f'polypolish filter --in1 {alignments_1} --in2 {alignments_2} --out1 {filtered_1} --out2 {filtered_2}',
+            stderr=True
+        )
+        handle.write(re.sub(r'\x1b\[[0-9;]*m', '', p.stderr))
+        p = syscall(
+            f"polypolish polish {assembly} {filtered_1} {filtered_2} | "
+            f"sed 's/polypolish//g' | "
+            f"seqkit sort -l -r -o {output}", stderr=True
+        )
+        handle.write(re.sub(r'\x1b\[[0-9;]*m', '', p.stderr))
+    for f in (alignments_1, alignments_2, filtered_1, filtered_2):
         os.remove(f)
     return output
 
@@ -57,14 +55,12 @@ def run_dnaapler(flye_output, outdir, threads):
 
 
 @logger.catch
-def run_pypolca(assembly, short_1, short_2, output_dir, depth, num_threads):
+def run_pypolca(assembly, short_1, short_2, output_dir, num_threads):
     """
     POLCA is a polishing tool in MaSuRCA (Maryland Super Read Cabog Assembler)
     https://github.com/alekseyzimin/masurca#polca
     """
-    cmd = f"pypolca run -a {assembly} -1 {short_1} -2 {short_2} -t {num_threads} -o {output_dir}"
-    if depth < 25:
-        cmd += " --careful"
+    cmd = f"pypolca run -a {assembly} -1 {short_1} -2 {short_2} -t {num_threads} -o {output_dir} --careful"
     logger.info(f"Running : {cmd}")
     syscall(cmd)
 
