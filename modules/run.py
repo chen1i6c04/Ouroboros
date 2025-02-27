@@ -65,9 +65,8 @@ def run_pypolca(assembly, short_1, short_2, output_dir, num_threads):
     syscall(cmd)
 
 
-def run_flye(reads, outdir, threads, high_quality):
-    input_type = '--nano-hq' if high_quality else '--nano-raw'
-    cmd = f'flye {input_type} {reads} -o {outdir} -t {threads}'
+def run_flye(reads, outdir, threads):
+    cmd = f'flye --nano-hq {reads} -o {outdir} -t {threads}'
     logger.info(f"Running : {cmd}")
     syscall(cmd)
 

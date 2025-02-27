@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import shutil
@@ -15,7 +16,7 @@ from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run
 from modules.plassembler import run_plassembler
 
 __location__ = os.path.dirname(os.path.abspath(__file__))
-__version__ = 'v1.0.0'
+__version__ = 'v0.1.0'
 
 
 def check_dependency():
@@ -25,20 +26,19 @@ def check_dependency():
         'filtlong': 'filtlong --version',
         'flye': 'flye -v',
         'medaka': 'medaka --version',
-        "KMC": "kmc | grep K-Mer",
+        "lrge": "lrge -V",
         'polypolish': 'polypolish --version',
-        'bwa': 'bwa 2>&1 | grep Version | cut -d " " -f 2',
         'pypolca': 'pypolca -V',
         'dnaapler': 'dnaapler -V',
         'plassembler': 'plassembler -V',
     }
     for program_name, cmd in version.items():
-        p = syscall(cmd, stdout=True)
-        if p.returncode:
+        child_process = syscall(cmd, stdout=True)
+        if child_process.returncode:
             logger.error(f"Could not determine version of {program_name}")
             sys.exit("Abort")
         else:
-            version = p.stdout.strip()
+            version = re.search('\d+(\.\d+)*', child_process.stdout).group()
             logger.info(f"Using {program_name:11} | {version}")
 
 
@@ -103,7 +103,8 @@ def main():
         '-p', '--keep-percent', metavar='', default=90, type=int, help='keep only this percentage of the best reads'
     )
     optional.add_argument('--nofilter', action='store_true', default=False, help='Disable long reads length filtering')
-    optional.add_argument('--notrim', action='store_true', default=False, help='Disable long reads trimming.')
+    optional.add_argument('-a', '--disable_adapter_trimming', action='store_false',
+                          help='Adapter trimming is enabled by default. If this option is specified, adapter trimming is disabled.')
     optional.add_argument(
         '-x', '--depth', default=100, type=int, help='Sub-sample reads to this depth. Disable with --depth 0'
     )
@@ -111,7 +112,6 @@ def main():
     optional.add_argument(
         '--medaka_model', default='r1041_e82_400bps_sup_v4.3.0', help='The model to be used by Medaka'
     )
-    optional.add_argument('--hq', action='store_true', help="Flye will use '--nano-hq' instead of --nano-raw")
     optional.add_argument(
         '--contaminants', help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.'
     )
@@ -131,7 +131,7 @@ def main():
     validate_fastq(args.short_2)
 
     reads = args.infile
-    if not args.notrim:
+    if args.disable_adapter_trimming:
         logger.info("Remove long reads adapters")
         trimmed_reads = os.path.join(args.outdir, 'READS_trim.fastq.gz')
         syscall(f"porechop -i {reads} -o {trimmed_reads} --check_reads 1000 --discard_middle --format fastq.gz -t {args.num_threads}")
@@ -187,7 +187,7 @@ def main():
     trimmed_one = os.path.join(args.outdir, 'READS_1.fastq.gz')
     trimmed_two = os.path.join(args.outdir, 'READS_2.fastq.gz')
     fastp_report = os.path.join(args.outdir, 'fastp.json')
-    syscall(f"fastp -i {args.short_1} -I {args.short_2} -o {trimmed_one} -O {trimmed_two} -l 50 -t 1 -5 -3 "
+    syscall(f"fastp -i {args.short_1} -I {args.short_2} -o {trimmed_one} -O {trimmed_two} -l 50 -5 -3 "
             f"-w {args.num_threads} --detect_adapter_for_pe -j {fastp_report} -h /dev/null")
     with open(fastp_report) as handle:
         total_bases = json.load(handle)['summary']['after_filtering']['total_bases']
@@ -197,7 +197,7 @@ def main():
 
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
-    run_flye(second_filter, flye_dir, args.num_threads, args.hq)
+    run_flye(second_filter, flye_dir, args.num_threads)
     shutil.copyfile(os.path.join(flye_dir, 'flye.log'), os.path.join(args.outdir, 'flye.log'))
     shutil.copyfile(os.path.join(flye_dir, 'assembly_info.txt'), os.path.join(args.outdir, 'flye_info.txt'))
     shutil.copyfile(os.path.join(flye_dir, 'assembly_graph.gfa'), os.path.join(args.outdir, 'flye-unpolished.gfa'))

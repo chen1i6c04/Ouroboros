@@ -2,12 +2,12 @@ import re
 import sys
 import gzip
 import subprocess
-from tempfile import TemporaryDirectory
+from tempfile import gettempdir
 from Bio import SeqIO
 from loguru import logger
 
 
-def syscall(cmd, stdout=False, stderr=True):
+def syscall(cmd, stdout=False, stderr=False):
     if stdout:
         stdout_str = subprocess.PIPE
     else:
@@ -65,12 +65,8 @@ def parse_genome_size(pattern):
 
 
 def estimate_genome_size(fastq_file, num_threads):
-    with TemporaryDirectory() as tmpdir:
-        output = syscall(
-            f"kmc -sm -fq -t{num_threads} -k21 -ci10 {fastq_file} {tmpdir}/kmc {tmpdir} | "
-            f"grep 'No. of unique counted k-mers' | "
-            f"awk '{{print $NF}}'", stdout=True
-        ).stdout
+    cmd = f"lrge -n 5000 -t {num_threads} -D {gettempdir()} {fastq_file}"
+    output = syscall(cmd, stdout=True).stdout
     genome_size = int(output.strip())
     logger.info(f"Estimated genome size was {genome_size}bp.")
     return genome_size

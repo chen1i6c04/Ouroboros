@@ -12,6 +12,7 @@ dependencies:
   - rasusa=2.1.0
   - nanoq=0.10.0
   - kmc=3.2.1
+  - lrge=0.1.1
   - polypolish=0.6.0
   - bwa=0.7.17
   - pypolca=0.3.0
@@ -24,4 +25,4 @@ dependencies:
   - htslib >=1.14
   - pyabpoa
   - pip:
-      - medaka=1.12.1
+      - medaka
