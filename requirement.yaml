@@ -19,7 +19,7 @@ dependencies:
   - filtlong=0.2.1
   - porechop=0.2.4
   - dnaapler=1.0.1
-  - plassembler=1.6.0
+  - plassembler=1.6.2
   - fastp=0.23.4
   - minimap2>=2.17
   - htslib >=1.14

@@ -21,18 +21,19 @@ def run_polypolish(assembly, short_1, short_2, output_dir, num_threads):
     output = os.path.join(output_dir, '4_polypolish.fasta')
     paired_mapping(short_1, short_2, alignments_1, alignments_2, assembly, num_threads)
 
-    with open(report, 'w') as handle:
-        p = syscall(
+    with open(report, 'w') as handle, NamedTemporaryFile('w') as tmpfile:
+        child_process = syscall(
             f'polypolish filter --in1 {alignments_1} --in2 {alignments_2} --out1 {filtered_1} --out2 {filtered_2}',
             stderr=True
         )
-        handle.write(re.sub(r'\x1b\[[0-9;]*m', '', p.stderr))
-        p = syscall(
-            f"polypolish polish {assembly} {filtered_1} {filtered_2} | "
-            f"sed 's/polypolish//g' | "
-            f"seqkit sort -l -r -o {output}", stderr=True
+        handle.write(re.sub(r'\x1b\[[0-9;]*m', '', child_process.stderr))
+        child_process = syscall(
+            f"polypolish polish {assembly} {filtered_1} {filtered_2}", stdout=True, stderr=True
         )
-        handle.write(re.sub(r'\x1b\[[0-9;]*m', '', p.stderr))
+        handle.write(re.sub(r'\x1b\[[0-9;]*m', '', child_process.stderr))
+        tmpfile.write(re.sub('polypolish', '', child_process.stdout))
+        tmpfile.flush()
+        syscall(f'seqkit sort -r -l {tmpfile.name} -o {output}')
     for f in (alignments_1, alignments_2, filtered_1, filtered_2):
         os.remove(f)
     return output

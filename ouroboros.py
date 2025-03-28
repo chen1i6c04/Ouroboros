@@ -16,7 +16,7 @@ from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run
 from modules.plassembler import run_plassembler
 
 __location__ = os.path.dirname(os.path.abspath(__file__))
-__version__ = 'v0.2.0'
+__version__ = 'v0.3.0'
 
 
 def check_dependency():
@@ -78,7 +78,7 @@ def short_reads_polish(assembly, short_1, short_2, outdir, threads):
 
 @logger.catch
 def check_plassembler_db_installation(db_dir):
-    syscall(f"plassembler download -f -d {db_dir}")
+    syscall(f"plassembler download -d {db_dir}")
 
 
 def main():
@@ -97,13 +97,11 @@ def main():
     optional.add_argument(
         '-t', '--num-threads', default=1, type=int, help='Set the allowed number of threads to be used by the script'
     )
-    optional.add_argument('-l', '--min-length', metavar='', default=1, type=int, help='Minimum length')
-    optional.add_argument('-q', '--min-quality', metavar='', default=1, type=int, help='Minimum mean quality')
     optional.add_argument(
         '-p', '--keep-percent', metavar='', default=90, type=int, help='keep only this percentage of the best reads'
     )
-    optional.add_argument('--nofilter', action='store_true', default=False, help='Disable long reads length filtering')
-    optional.add_argument('-a', '--disable_adapter_trimming', action='store_false',
+    optional.add_argument('-q', '--disable_quality_filter', action='store_true', default=False, help='Disable long reads filter.')
+    optional.add_argument('-a', '--disable_adapter_trimming', action='store_true',
                           help='Adapter trimming is enabled by default. If this option is specified, adapter trimming is disabled.')
     optional.add_argument(
         '-x', '--depth', default=100, type=int, help='Sub-sample reads to this depth. Disable with --depth 0'
@@ -131,7 +129,7 @@ def main():
     validate_fastq(args.short_2)
 
     reads = args.infile
-    if args.disable_adapter_trimming:
+    if args.disable_adapter_trimming is False:
         logger.info("Remove long reads adapters")
         trimmed_reads = os.path.join(args.outdir, 'READS_trim.fastq.gz')
         syscall(f"porechop -i {reads} -o {trimmed_reads} --check_reads 1000 --discard_middle --format fastq.gz -t {args.num_threads}")
@@ -148,11 +146,11 @@ def main():
         )
         reads = cleaned_reads
 
-    if not args.nofilter:
-        first_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
+    if not args.disable_quality_filter:
+        quality_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
         logger.info(f"Keep only {args.keep_percent} percentage of the best reads")
-        syscall(f'filtlong --keep_percent {args.keep_percent} {reads} | pigz -6 -p {args.num_threads} > {first_filter}')
-        reads = first_filter
+        syscall(f'filtlong --keep_percent {args.keep_percent} {reads} | pigz -6 -p {args.num_threads} > {quality_filter}')
+        reads = quality_filter
     total_bases = json.loads(syscall(f"nanoq -s -f -j -i {reads}", stdout=True).stdout)['bases']
 
     if args.gsize:
@@ -169,19 +167,14 @@ def main():
     logger.info(f'Estimated long sequencing depth: {origin_depth:.0f}x')
     if args.depth:
         if origin_depth > args.depth:
-            logger.info(f"Subsampling reads from {origin_depth:.0f}x to {args.depth}x.")
+            logger.info(f"Subsampling long reads from {origin_depth:.0f}x to {args.depth}x.")
             sub_reads = os.path.join(args.outdir, 'READS.sub.fastq')
-            syscall(f"rasusa reads -b {gsize * args.depth} {reads} -o {sub_reads}")
+            syscall(f"filtlong -t {gsize * args.depth} {reads} > {sub_reads}")
         else:
             logger.info("No read depth reduction requested or necessary.")
             sub_reads = reads
     else:
         sub_reads = reads
-
-    logger.info(f"Filter out reads length less than {args.min_length:,}bp and average qscore less than {args.min_quality}")
-    second_filter = os.path.join(args.outdir, 'READS.len.fastq.gz')
-    syscall(f'nanoq -i {sub_reads} -f -l {args.min_length} -q {args.min_quality} | '
-            f'pigz -6 -p {args.num_threads} > {second_filter}')
 
     logger.info('Trimming short reads.')
     trimmed_one = os.path.join(args.outdir, 'READS_1.fastq.gz')
@@ -194,10 +187,17 @@ def main():
 
     origin_depth = total_bases / gsize
     logger.info(f'Estimated short sequencing depth: {origin_depth:.0f}x')
+    if origin_depth > 100:
+        logger.info(f"Subsampling short reads from {origin_depth:.0f}x to 100x.")
+        sub_one = os.path.join(args.outdir, 'READS_1.sub.fastq.gz')
+        sub_two = os.path.join(args.outdir, 'READS_2.sub.fastq.gz')
+        fraction = 100 / origin_depth
+        syscall(f"rasusa reads -f {fraction} -O g -o {sub_one} -o {sub_two} {trimmed_one} {trimmed_two}")
+        trimmed_one, trimmed_two = sub_one, sub_two
 
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
-    run_flye(second_filter, flye_dir, args.num_threads)
+    run_flye(sub_reads, flye_dir, args.num_threads)
     shutil.copyfile(os.path.join(flye_dir, 'flye.log'), os.path.join(args.outdir, 'flye.log'))
     shutil.copyfile(os.path.join(flye_dir, 'assembly_info.txt'), os.path.join(args.outdir, 'flye_info.txt'))
     shutil.copyfile(os.path.join(flye_dir, 'assembly_graph.gfa'), os.path.join(args.outdir, 'flye-unpolished.gfa'))
@@ -212,14 +212,14 @@ def main():
     medaka_dir = os.path.join(args.outdir, 'medaka')
     medaka_asm = os.path.join(args.outdir, '2_medaka.fasta')
     run_medaka(
-        assembly=dnaapler_asm, reads=second_filter, outdir=medaka_dir, model=args.medaka_model, threads=args.num_threads
+        assembly=dnaapler_asm, reads=sub_reads, outdir=medaka_dir, model=args.medaka_model, threads=args.num_threads
     )
     syscall(f"seqkit sort -l -r {os.path.join(medaka_dir, 'consensus.fasta')} -o {medaka_asm}")
 
     logger.info("Plasmid assembly.")
     plassembler_dir = os.path.join(args.outdir, 'plassembler')
     chromosome, plasmids = run_plassembler(
-        reads=sub_reads,
+        reads=reads,
         assembly=medaka_asm, assembly_info=os.path.join(args.outdir, 'flye_info.txt'),
         outdir=plassembler_dir, database=plassembler_db, short_one=trimmed_one, short_two=trimmed_two,
         threads=args.num_threads
@@ -237,7 +237,10 @@ def main():
 
     for d in (flye_dir, medaka_dir, dnaapler_dir):
         shutil.rmtree(d)
-    syscall(f"rm {os.path.join(args.outdir, 'READS*')}")
+    for child in os.listdir(args.outdir):
+        if child.startswith('READS'):
+            f = os.path.join(args.outdir, child)
+            os.remove(f)
     logger.info("Done")
 
 

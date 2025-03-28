@@ -1,8 +1,9 @@
+import os
 import re
 import sys
 import gzip
 import subprocess
-from tempfile import gettempdir
+from tempfile import TemporaryDirectory
 from Bio import SeqIO
 from loguru import logger
 
@@ -65,8 +66,13 @@ def parse_genome_size(pattern):
 
 
 def estimate_genome_size(fastq_file, num_threads):
-    cmd = f"lrge -n 5000 -t {num_threads} -D {gettempdir()} {fastq_file}"
-    output = syscall(cmd, stdout=True).stdout
+    current_location = os.path.dirname(os.path.abspath(__file__))
+    program = os.path.join(current_location, '..', 'bin', 'genome_size_raven.sh')
+    with TemporaryDirectory() as tmpdir:
+        tmpfile = os.path.join(tmpdir, 'READS.fastq.gz')
+        syscall(f"rasusa reads -b 100M {fastq_file} -o {tmpfile}")
+        cmd = f"{program} {tmpfile} {num_threads}"
+        output = syscall(cmd, stdout=True).stdout
     genome_size = int(output.strip())
     logger.info(f"Estimated genome size was {genome_size}bp.")
     return genome_size
