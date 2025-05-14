@@ -4,15 +4,13 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - pip
   - python
   - biopython=1.78
   - loguru=0.5.3
   - flye=2.9.4
   - rasusa=2.1.0
   - nanoq=0.10.0
-  - kmc=3.2.1
-  - lrge=0.1.1
+  - raven-assembler=1.8.3
   - polypolish=0.6.0
   - bwa=0.7.17
   - pypolca=0.3.0
@@ -25,4 +23,4 @@ dependencies:
   - htslib >=1.14
   - pyabpoa
   - pip:
-      - medaka
+    - medaka

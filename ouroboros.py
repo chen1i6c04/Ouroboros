@@ -13,7 +13,7 @@ from modules.utils import (syscall,
                            validate_fastq,
                            parse_genome_size)
 from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run_medaka
-from modules.plassembler import run_plassembler
+from modules.plassembler import run_plassembler, check_plassembler_db_installation
 
 __location__ = os.path.dirname(os.path.abspath(__file__))
 __version__ = 'v0.3.0'
@@ -26,7 +26,8 @@ def check_dependency():
         'filtlong': 'filtlong --version',
         'flye': 'flye -v',
         'medaka': 'medaka --version',
-        "lrge": "lrge -V",
+        # "lrge": "lrge -V",
+        'raven': 'raven --version',
         'polypolish': 'polypolish --version',
         'pypolca': 'pypolca -V',
         'dnaapler': 'dnaapler -V',
@@ -76,11 +77,6 @@ def short_reads_polish(assembly, short_1, short_2, outdir, threads):
     shutil.rmtree(polca_dir)
 
 
-@logger.catch
-def check_plassembler_db_installation(db_dir):
-    syscall(f"plassembler download -d {db_dir}")
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog="ouroboros.py",
@@ -108,7 +104,7 @@ def main():
     )
     optional.add_argument('-g', '--gsize', default=None, metavar='', help='Estimated genome size eg. 3.2M <blank=AUTO>')
     optional.add_argument(
-        '--medaka_model', default='r1041_e82_400bps_sup_v4.3.0', help='The model to be used by Medaka'
+        '--medaka_model', default='r1041_e82_400bps_bacterial_methylation', help='The model to be used by Medaka'
     )
     optional.add_argument(
         '--contaminants', help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.'
@@ -187,13 +183,6 @@ def main():
 
     origin_depth = total_bases / gsize
     logger.info(f'Estimated short sequencing depth: {origin_depth:.0f}x')
-    if origin_depth > 100:
-        logger.info(f"Subsampling short reads from {origin_depth:.0f}x to 100x.")
-        sub_one = os.path.join(args.outdir, 'READS_1.sub.fastq.gz')
-        sub_two = os.path.join(args.outdir, 'READS_2.sub.fastq.gz')
-        fraction = 100 / origin_depth
-        syscall(f"rasusa reads -f {fraction} -O g -o {sub_one} -o {sub_two} {trimmed_one} {trimmed_two}")
-        trimmed_one, trimmed_two = sub_one, sub_two
 
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
