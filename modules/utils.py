@@ -1,5 +1,6 @@
 import os
 import re
+import csv
 import sys
 import gzip
 import subprocess
@@ -66,16 +67,11 @@ def parse_genome_size(pattern):
 
 
 def estimate_genome_size(fastq_file, num_threads):
-    current_location = os.path.dirname(os.path.abspath(__file__))
-    program = os.path.join(current_location, '..', 'bin', 'genome_size_raven.sh')
     with TemporaryDirectory() as tmpdir:
-        tmpfile = os.path.join(tmpdir, 'READS.fastq.gz')
-        syscall(f"rasusa reads -b 100M {fastq_file} -o {tmpfile}")
-        cmd = f"{program} {tmpfile} {num_threads}"
-        output = syscall(cmd, stdout=True).stdout
-    genome_size = int(output.strip())
-    logger.info(f"Estimated genome size was {genome_size}bp.")
-    return genome_size
+        cmd = (f"kmc -sm -t{num_threads} -k21 -ci10 {fastq_file} {tmpdir}/kmc {tmpdir} | "
+               f"grep -oP 'No. of unique counted k-mers\s+:\s+\K\d+'")
+        child_process = syscall(cmd, stdout=True)
+    return int(child_process.stdout)
 
 
 def exclude_target_from_single_end(input_reads, output_reads, target, threads):
@@ -95,3 +91,53 @@ def exclude_target_from_paired_end(paired_1, paired_2, output_1, output_2, targe
         f"samtools fastq -@ {threads} -1 {output_1} -2 {output_2} -0 /dev/null -s /dev/null -n -"
     )
     syscall(cmd)
+
+
+def annotate_assembly(assembly, assembly_info):
+    coverage_dict = dict()
+    circular_dict = dict()
+    with open(assembly_info) as handle:
+        spamreader = csv.reader(handle, delimiter='\t')
+        next(spamreader)  # ignore header
+        for row in spamreader:
+            coverage_dict[row[0]] = row[2]
+            circular_dict[row[0]] = row[3]
+    records = []
+    for record in SeqIO.parse(assembly, 'fasta'):
+        length = len(record)
+        coverage = coverage_dict[record.id]
+        circular = circular_dict[record.id]
+        record.description = f"length={length} coverage={coverage}{' circular=true' if circular == 'Y' else ''}"
+        records.append(record)
+    records = sorted(records, key=lambda record: len(record.seq), reverse=True)
+    return records
+
+
+def merge_chromosome_amd_plasmid(dirpath):
+    assembly = os.path.join(dirpath, '2_medaka.fasta')
+    assembly_info = os.path.join(dirpath, 'flye_info.txt')
+    records = annotate_assembly(assembly, assembly_info)
+    records = list(filter(lambda rec: len(rec.seq)>=1e6, records))
+    if len(records) == 1:
+        records[0].id = records[0].name = 'chromosome'
+    else:
+        for idx, record in enumerate(records, 1):
+            record.id = record.name = f'chromosome_{idx}'
+    plasmids = os.path.join(dirpath, 'plassembler', 'plassembler_plasmids.fasta')
+    with open(os.path.join(dirpath, '3_plassembler.fasta'), 'w') as handle:
+        SeqIO.write(records, handle, 'fasta')
+        for record in SeqIO.parse(plasmids, 'fasta'):
+            SeqIO.write(record, handle, 'fasta')
+
+
+def collate(query, subject, result):
+    describe = {}
+    for record in SeqIO.parse(subject, 'fasta'):
+        describe[record.id] = record.description
+    records = []
+    for record in SeqIO.parse(query, 'fasta'):
+        description = describe[record.id]
+        description = re.sub('length=\d+', f'length={len(record)}', description)
+        record.description = description
+        records.append(record)
+    SeqIO.write(records, result, 'fasta')

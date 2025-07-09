@@ -11,12 +11,14 @@ from modules.utils import (syscall,
                            estimate_genome_size,
                            exclude_target_from_single_end,
                            validate_fastq,
-                           parse_genome_size)
+                           parse_genome_size,
+                           merge_chromosome_amd_plasmid,
+                           collate)
 from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run_medaka
 from modules.plassembler import run_plassembler, check_plassembler_db_installation
 
 __location__ = os.path.dirname(os.path.abspath(__file__))
-__version__ = 'v0.3.0'
+__version__ = 'v0.4.0'
 
 
 def check_dependency():
@@ -26,8 +28,6 @@ def check_dependency():
         'filtlong': 'filtlong --version',
         'flye': 'flye -v',
         'medaka': 'medaka --version',
-        # "lrge": "lrge -V",
-        'raven': 'raven --version',
         'polypolish': 'polypolish --version',
         'pypolca': 'pypolca -V',
         'dnaapler': 'dnaapler -V',
@@ -71,8 +71,7 @@ def short_reads_polish(assembly, short_1, short_2, outdir, threads):
     polca_dir = os.path.join(outdir, 'pypolca')
     polca_asm = os.path.join(polca_dir, 'pypolca_corrected.fasta')
     run_pypolca(polypolish_asm, short_1, short_2, polca_dir, threads)
-
-    syscall(f"seqkit sort -r -l -o {os.path.join(outdir, '5_pypolca.fasta')} {polca_asm}")
+    collate(polca_asm, polypolish_asm, os.path.join(outdir, '5_pypolca.fasta'))
     shutil.copy(os.path.join(polca_dir, 'pypolca.report'), outdir)
     shutil.rmtree(polca_dir)
 
@@ -100,11 +99,11 @@ def main():
     optional.add_argument('-a', '--disable_adapter_trimming', action='store_true',
                           help='Adapter trimming is enabled by default. If this option is specified, adapter trimming is disabled.')
     optional.add_argument(
-        '-x', '--depth', default=100, type=int, help='Sub-sample reads to this depth. Disable with --depth 0'
+        '-x', '--depth', default=50, type=int, help='Sub-sample reads to this depth. Disable with --depth 0'
     )
     optional.add_argument('-g', '--gsize', default=None, metavar='', help='Estimated genome size eg. 3.2M <blank=AUTO>')
     optional.add_argument(
-        '--medaka_model', default='r1041_e82_400bps_bacterial_methylation', help='The model to be used by Medaka'
+        '-m', '--medaka_model', default='r1041_e82_400bps_bacterial_methylation', help='The model to be used by Medaka'
     )
     optional.add_argument(
         '--contaminants', help='Contaminants FASTA file or Minimap2 index to map long reads against to filter out.'
@@ -142,22 +141,37 @@ def main():
         )
         reads = cleaned_reads
 
-    if not args.disable_quality_filter:
-        quality_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
-        logger.info(f"Keep only {args.keep_percent} percentage of the best reads")
-        syscall(f'filtlong --keep_percent {args.keep_percent} {reads} | pigz -6 -p {args.num_threads} > {quality_filter}')
-        reads = quality_filter
-    total_bases = json.loads(syscall(f"nanoq -s -f -j -i {reads}", stdout=True).stdout)['bases']
-
+    logger.info('Trimming short reads.')
+    trimmed_one = os.path.join(args.outdir, 'READS_1.fastq.gz')
+    trimmed_two = os.path.join(args.outdir, 'READS_2.fastq.gz')
+    fastp_report = os.path.join(args.outdir, 'fastp.json')
+    syscall(f"fastp -i {args.short_1} -I {args.short_2} -o {trimmed_one} -O {trimmed_two} -l 50 -5 -3 "
+            f"-w {args.num_threads} --detect_adapter_for_pe -j {fastp_report} -h /dev/null")
+    with open(fastp_report) as handle:
+        fastp_report = json.load(handle)
+        total_bases = fastp_report['summary']['after_filtering']['total_bases']
+        read1_q30_bases = fastp_report['read1_after_filtering']['q30_bases']
+        read2_q30_bases = fastp_report['read2_after_filtering']['q30_bases']
     if args.gsize:
         gsize = parse_genome_size(args.gsize)
         if gsize:
             logger.info(f"Using genome size was {gsize}bp.")
         else:
             logger.warning(f"Couldn't parse string {args.gsize}, will auto estimate.")
-            gsize = estimate_genome_size(reads, args.num_threads)
+            gsize = estimate_genome_size(trimmed_one if read1_q30_bases >= read2_q30_bases else trimmed_two, args.num_threads)
     else:
-        gsize = estimate_genome_size(reads, args.num_threads)
+        gsize = estimate_genome_size(trimmed_one if read1_q30_bases >= read2_q30_bases else trimmed_two,
+                                     args.num_threads)
+        logger.info(f"Using genome size was {gsize}bp.")
+    origin_depth = total_bases / gsize
+    logger.info(f'Estimated short sequencing depth: {origin_depth:.0f}x')
+
+    if not args.disable_quality_filter:
+        quality_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
+        logger.info(f"Keep only {args.keep_percent} percentage of the best reads")
+        syscall(f'filtlong --keep_percent {args.keep_percent} {reads} | pigz -6 -p {args.num_threads} > {quality_filter}')
+        reads = quality_filter
+    total_bases = json.loads(syscall(f"nanoq -s -f -j -i {reads}", stdout=True).stdout)['bases']
 
     origin_depth = total_bases / gsize
     logger.info(f'Estimated long sequencing depth: {origin_depth:.0f}x')
@@ -171,18 +185,6 @@ def main():
             sub_reads = reads
     else:
         sub_reads = reads
-
-    logger.info('Trimming short reads.')
-    trimmed_one = os.path.join(args.outdir, 'READS_1.fastq.gz')
-    trimmed_two = os.path.join(args.outdir, 'READS_2.fastq.gz')
-    fastp_report = os.path.join(args.outdir, 'fastp.json')
-    syscall(f"fastp -i {args.short_1} -I {args.short_2} -o {trimmed_one} -O {trimmed_two} -l 50 -5 -3 "
-            f"-w {args.num_threads} --detect_adapter_for_pe -j {fastp_report} -h /dev/null")
-    with open(fastp_report) as handle:
-        total_bases = json.load(handle)['summary']['after_filtering']['total_bases']
-
-    origin_depth = total_bases / gsize
-    logger.info(f'Estimated short sequencing depth: {origin_depth:.0f}x')
 
     logger.info("Assembling reads with Flye")
     flye_dir = os.path.join(args.outdir, 'flye')
@@ -207,21 +209,19 @@ def main():
 
     logger.info("Plasmid assembly.")
     plassembler_dir = os.path.join(args.outdir, 'plassembler')
-    chromosome, plasmids = run_plassembler(
+    run_plassembler(
         reads=reads,
-        assembly=medaka_asm, assembly_info=os.path.join(args.outdir, 'flye_info.txt'),
+        flye_directory=flye_dir,
         outdir=plassembler_dir, database=plassembler_db, short_one=trimmed_one, short_two=trimmed_two,
         threads=args.num_threads
     )
+    merge_chromosome_amd_plasmid(args.outdir)
     plassembler_asm = os.path.join(args.outdir, '3_plassembler.fasta')
-    syscall(f"cat {chromosome} {plasmids} > {plassembler_asm}")
-
-
 
     short_reads_polish(
         plassembler_asm, trimmed_one, trimmed_two, args.outdir, args.num_threads
     )
-    syscall(f"seqkit sort -l -r  -o {os.path.join(args.outdir, 'assembly.fasta')} "
+    syscall(f"seqkit sort -l -r -o {os.path.join(args.outdir, 'assembly.fasta')} "
             f"{os.path.join(args.outdir, '5_pypolca.fasta')}")
 
     for d in (flye_dir, medaka_dir, dnaapler_dir):
