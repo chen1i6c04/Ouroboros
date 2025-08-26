@@ -13,7 +13,7 @@ from modules.utils import (syscall,
                            validate_fastq,
                            parse_genome_size,
                            merge_chromosome_amd_plasmid,
-                           collate)
+                           annotate_pypolca_assembly)
 from modules.run import run_polypolish, run_dnaapler, run_pypolca, run_flye, run_medaka
 from modules.plassembler import run_plassembler, check_plassembler_db_installation
 
@@ -44,7 +44,7 @@ def check_dependency():
 
 
 def print_used_values(args):
-    command = []
+    command = list()
     args = vars(args)
     for argument, value in args.items():
         if value:
@@ -59,7 +59,7 @@ def begin(outdir):
     os.makedirs(outdir, exist_ok=True)
     log_format = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
     logfile = os.path.join(outdir, 'ouroboros.log')
-    logger.add(logfile, format=log_format, level='INFO')
+    logger.add(logfile, format=log_format, level='INFO', mode='w')
     logger.add(sys.stderr, format=log_format, level='ERROR')
     logger.info(f"You are using Ouroboros version {__version__}")
     logger.info("You ran: " + ' '.join(sys.argv))
@@ -71,7 +71,7 @@ def short_reads_polish(assembly, short_1, short_2, outdir, threads):
     polca_dir = os.path.join(outdir, 'pypolca')
     polca_asm = os.path.join(polca_dir, 'pypolca_corrected.fasta')
     run_pypolca(polypolish_asm, short_1, short_2, polca_dir, threads)
-    collate(polca_asm, polypolish_asm, os.path.join(outdir, '5_pypolca.fasta'))
+    annotate_pypolca_assembly(polca_asm, polypolish_asm, os.path.join(outdir, '5_pypolca.fasta'))
     shutil.copy(os.path.join(polca_dir, 'pypolca.report'), outdir)
     shutil.rmtree(polca_dir)
 
@@ -93,13 +93,18 @@ def main():
         '-t', '--num-threads', default=1, type=int, help='Set the allowed number of threads to be used by the script'
     )
     optional.add_argument(
-        '-p', '--keep-percent', metavar='', default=90, type=int, help='keep only this percentage of the best reads'
+        '-p', '--keep-percent', metavar='', default=95, type=int, help='Keep only this percentage of the best reads. Disable with 0'
     )
-    optional.add_argument('-q', '--disable_quality_filter', action='store_true', default=False, help='Disable long reads filter.')
+    optional.add_argument(
+        '-l', '--min-length', metavar='', default=0, type=int, help='Minimum read length'
+    )
+    optional.add_argument(
+        '-q', '--min-quality', metavar='', default=0, type=int, help='Minimum average read quality'
+    )
     optional.add_argument('-a', '--disable_adapter_trimming', action='store_true',
                           help='Adapter trimming is enabled by default. If this option is specified, adapter trimming is disabled.')
     optional.add_argument(
-        '-x', '--depth', default=50, type=int, help='Sub-sample reads to this depth. Disable with --depth 0'
+        '-x', '--depth', default=50, type=int, help='Sub-sample reads to this depth. Disable with 0'
     )
     optional.add_argument('-g', '--gsize', default=None, metavar='', help='Estimated genome size eg. 3.2M <blank=AUTO>')
     optional.add_argument(
@@ -166,11 +171,19 @@ def main():
     origin_depth = total_bases / gsize
     logger.info(f'Estimated short sequencing depth: {origin_depth:.0f}x')
 
-    if not args.disable_quality_filter:
-        quality_filter = os.path.join(args.outdir, 'READS.qual.fastq.gz')
-        logger.info(f"Keep only {args.keep_percent} percentage of the best reads")
-        syscall(f'filtlong --keep_percent {args.keep_percent} {reads} | pigz -6 -p {args.num_threads} > {quality_filter}')
-        reads = quality_filter
+    if any((args.keep_percent, args.min_length, args.min_quality)):
+        filter_reads = os.path.join(args.outdir, 'READS.filter.fastq.gz')
+        cmd = f"filtlong {reads}"
+        if args.keep_percent:
+            cmd += f" --keep_percent {args.keep_percent}"
+        if args.min_length:
+            cmd += f" --min_length {args.min_length}"
+        if args.min_quality:
+            cmd += f" --min_mean_q {args.min_quality}"
+        cmd += f" | pigz -6 -p {args.num_threads} > {filter_reads}"
+        syscall(cmd)
+        reads = filter_reads
+
     total_bases = json.loads(syscall(f"nanoq -s -f -j -i {reads}", stdout=True).stdout)['bases']
 
     origin_depth = total_bases / gsize
@@ -210,10 +223,8 @@ def main():
     logger.info("Plasmid assembly.")
     plassembler_dir = os.path.join(args.outdir, 'plassembler')
     run_plassembler(
-        reads=reads,
-        flye_directory=flye_dir,
-        outdir=plassembler_dir, database=plassembler_db, short_one=trimmed_one, short_two=trimmed_two,
-        threads=args.num_threads
+        reads=reads, flye_directory=flye_dir, outdir=plassembler_dir, database=plassembler_db,
+        short_one=trimmed_one, short_two=trimmed_two, threads=args.num_threads
     )
     merge_chromosome_amd_plasmid(args.outdir)
     plassembler_asm = os.path.join(args.outdir, '3_plassembler.fasta')
