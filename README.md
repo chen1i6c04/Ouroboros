@@ -11,7 +11,7 @@ Ouroboros is designed to assembly complete genome and is therefore not suitable 
 It is recommended to read Ryan Wick's [tutorial](https://github.com/rrwick/Perfect-bacterial-genome-tutorial) and 
 [blog](https://rrwick.github.io/) before using.
   
-This tool is specifically build for central laboratory of [Taiwan CDC](https://www.cdc.gov.tw/).
+This tool is specifically build for central laboratory of [Taiwan CDC](https://www.cdc.gov.tw/En).
 
 # Installation
 You will need to install the external dependencies separately with `conda`, which can be found in `requirement.yaml`
@@ -91,5 +91,7 @@ KMC:
 * Sebastian Deorowicz, Marek Kokot, Szymon Grabowski, Agnieszka Debudaj-Grabysz, KMC 2: fast and resource-frugal k-mer counting, Bioinformatics, Volume 31, Issue 10, 15 May 2015, Pages 1569–1576, https://doi.org/10.1093/bioinformatics/btv022
 * Deorowicz, S., Debudaj-Grabysz, A. & Grabowski, S. Disk-based k-mer counting on a PC. BMC Bioinformatics 14, 160 (2013). https://doi.org/10.1186/1471-2105-14-160
 
-BWA-MEM2
-* M. Vasimuddin, S. Misra, H. Li and S. Aluru, "Efficient Architecture-Aware Acceleration of BWA-MEM for Multicore Systems," 2019 IEEE International Parallel and Distributed Processing Symposium (IPDPS), Rio de Janeiro, Brazil, 2019, pp. 314-324, doi: 10.1109/IPDPS.2019.00041.
+BWA:
+* Li H. and Durbin R. (2009) Fast and accurate short read alignment with Burrows-Wheeler transform. Bioinformatics, 25, 1754-1760. [PMID: 19451168]. (if you use the BWA-backtrack algorithm)
+* Li H. and Durbin R. (2010) Fast and accurate long-read alignment with Burrows-Wheeler transform. Bioinformatics, 26, 589-595. [PMID: 20080505]. (if you use the BWA-SW algorithm)
+* Li H. (2013) Aligning sequence reads, clone sequences and assembly contigs with BWA-MEM. arXiv:1303.3997v2 [q-bio.GN]. (if you use the BWA-MEM algorithm or the fastmap command, or want to cite the whole BWA package)

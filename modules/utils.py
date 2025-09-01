@@ -130,12 +130,12 @@ def merge_chromosome_amd_plasmid(dirpath):
             SeqIO.write(record, handle, 'fasta')
 
 
-def collate(query, subject, result):
+def annotate_pypolca_assembly(pypolca_asm, polypolish_asm, result):
     describe = {}
-    for record in SeqIO.parse(subject, 'fasta'):
+    for record in SeqIO.parse(polypolish_asm, 'fasta'):
         describe[record.id] = record.description
     records = []
-    for record in SeqIO.parse(query, 'fasta'):
+    for record in SeqIO.parse(pypolca_asm, 'fasta'):
         description = describe[record.id]
         description = re.sub('length=\d+', f'length={len(record)}', description)
         record.description = description

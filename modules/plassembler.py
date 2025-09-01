@@ -6,7 +6,7 @@ from .utils import syscall
 
 @logger.catch
 def run_plassembler(reads, flye_directory, outdir, database, short_one, short_two, threads):
-    cmd = (f"plassembler run --skip_qc --skip_mash --keep_chromosome --depth_filter 0.5 "
+    cmd = (f"plassembler run --skip_qc --skip_mash --depth_filter 0.5 "
            f"-t {threads} -d {database} -l {reads} "
            f"-1 {short_one} -2 {short_two} "
            f"-o {outdir} --flye_directory {flye_directory} "
